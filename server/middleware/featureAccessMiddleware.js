@@ -10,11 +10,20 @@ const checkFeatureAccess = (feature) => {
 
             let role = req.user.role;
             if (!role) {
-                const dbUser = await User.findOne({ userId: req.user.uid }).select('role');
+                const dbUser = await User.findOne({ userId: req.user.uid }).select('role hasPro hasFullAccess');
                 if (!dbUser) {
                     return res.status(404).json({ message: "User not found" });
                 }
-                role = dbUser.role;
+                
+                let effectiveRole = dbUser.role || 'normal';
+                if (effectiveRole === 'normal') {
+                    if (dbUser.hasFullAccess) {
+                        effectiveRole = 'full';
+                    } else if (dbUser.hasPro) {
+                        effectiveRole = 'pro';
+                    }
+                }
+                role = effectiveRole;
                 req.user.role = role; // Cache for subsequent middlewares
             }
 
