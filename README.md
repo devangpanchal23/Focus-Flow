@@ -9,134 +9,156 @@ Frontend: React, Vite, Tailwind CSS
 Backend: Node.js, Express
 
 Database: MongoDB
+\
+# Blitzit Clone — Focus, Tasks, and Habit Performance Platform
 
-Integrations: Firebase, Notion
+A production-ready MERN application for focus-driven productivity. It combines task execution, habit reinforcement, focus tracking, and real-time notifications with a scalable backend and modern React UI. Built for fast iteration, reliable deployments, and long-term growth.
 
-Tooling: ESLint, PostCSS
+---
 
-✨ Features
+## Key Features
 
-🔐 Authentication
+- Secure authentication with Clerk JWT validation
+- Task scheduling, completion tracking, and time logging
+- Daily stats aggregation and focus scoring
+- Habit tracking and streak-based progress
+- Notifications pipeline and activity logs
+- Admin-ready backend structure and audit-friendly models
+- Production Docker deployment with Nginx reverse proxy
 
-✅ Task & habit tracking
+---
 
-📊 Analytics & data export (multiple formats)
+## Tech Stack
 
-🚫 Website blocking extension
+- Frontend: React (Vite), Tailwind CSS
+- Backend: Node.js, Express, MongoDB (Mongoose)
+- Auth: Clerk JWT / Local JWT fallback
+- Infra: Docker, Docker Compose, Nginx
 
-🔗 Notion integration
+---
 
-🔥 Firebase integration
+## Project Structure
 
-⚡ Fast development with Vite + HMR
+```
+.
+├── src/                        # Frontend React app
+├── server/                     # Express backend
+├── nginx/                      # Nginx reverse proxy config
+├── public/                     # Static assets
+├── dist/                       # Vite build output
+├── docker-compose.yml
+├── Dockerfile.frontend
+├── Dockerfile.backend
+└── .env
+```
 
-📂 Project Structure
-blitzit_clone/
-├── public/
-├── server/
-├── src/
-├── web-block-extension/
-├── .env.example
-├── .gitignore
-├── package.json
-└── README.md
+---
 
-🔑 Environment Variables Setup
+## Local Development
 
-This project uses environment variables for secure configuration.
+1) Install dependencies
 
-1️⃣ Create your .env file
-cp .env.example .env
-
-2️⃣ Fill in your own values
-
-Edit .env and add your own API keys:
-
-PORT=5001
-MONGODB_URI=
-
-VITE_FIREBASE_API_KEY=
-VITE_FIREBASE_AUTH_DOMAIN=
-VITE_FIREBASE_PROJECT_ID=
-VITE_FIREBASE_STORAGE_BUCKET=
-VITE_FIREBASE_MESSAGING_SENDER_ID=
-VITE_FIREBASE_APP_ID=
-
-NOTION_API_KEY=
-NOTION_API_VERSION=2022-06-28
-
-
-⚠️ Important
-
-Never commit .env to GitHub
-
-.env is ignored via .gitignore
-
-.env.example is safe and tracked
-
-📦 Installation & Setup
-Clone the repository
-git clone https://github.com/devangpanchal23/blitzit_clone.git
-cd blitzit_clone
-
-Install dependencies
+```
 npm install
+```
 
-Start development server
+2) Create environment file
+
+```
+cp .env.example .env
+```
+
+3) Start the dev environment
+
+```
 npm run dev
+```
 
-Start backend (if applicable)
-npm run server
+Frontend runs on Vite’s default port. Backend runs on port 5000.
 
-📤 Data Export
+---
 
-Blitzit supports exporting analytics and task data in multiple formats for easy tracking and reporting.
+## Docker Deployment (Local)
 
-🔒 Security Best Practices
+1) Build and start services
 
-Secrets are stored in .env (never committed)
+```
+docker compose up --build
+```
 
-GitHub Push Protection enabled
+2) Access the app
 
-API keys must be rotated if exposed
+- Frontend: http://localhost
+- Backend: http://localhost:5000
 
-Environment validation recommended for production
+---
 
-🧪 Linting
-npm run lint
+## Environment Variables
 
-🚀 Build for Production
-npm run build
+Create .env with the following keys:
 
-🤝 Contributing
+```
+NODE_ENV=production
+PORT=5000
+MONGO_URI=your_mongodb_atlas_uri
+JWT_SECRET=your_jwt_secret
 
-Create a feature branch
+VITE_API_URL=http://localhost:5000
+VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
 
-git checkout -b feature/your-feature
+# Optional Clerk backend validation
+CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+CLERK_SECRET_KEY=your_clerk_secret_key
+```
 
+---
 
-Commit changes
+## Production Deployment (VPS + Docker)
 
-git commit -m "feat: add new feature"
+1) Provision server
+- Ubuntu 22.04 LTS
+- Docker + Docker Compose installed
 
+2) Clone repository and configure environment
 
-Push and open a Pull Request
+```
+git clone <repo_url>
+cd <repo>
+cp .env.example .env
+```
 
-📄 License
+3) Start services
 
-This project is licensed for learning and personal use.
+```
+docker compose up -d --build
+```
 
-👨‍💻 Author
+4) Configure DNS and TLS
+- Point domain A record to VPS IP
+- Add TLS with a reverse proxy (Caddy/Traefik) or terminate at Nginx in a separate edge layer
 
-Devang Panchal
-GitHub: @devangpanchal23
+---
 
-⭐ Final Notes
+## API Architecture Overview
 
-If you clone this repository:
+- Stateless REST API with JWT verification middleware
+- Modular routing per resource (tasks, habits, stats, users)
+- Mongoose models with indexed access patterns
+- Aggregation-friendly DailyStats collection for analytics
+- Service layer utilities for score calculation and event-driven notifications
 
-Configure your .env
+---
 
-Add your own API keys
+## Scalability & Future Growth
 
-Run locally without exposing secrets
+- Extract notifications into a dedicated worker service
+- Add queueing (BullMQ/RabbitMQ) for async jobs
+- Introduce GraphQL or API gateway for multi-client support
+- CI/CD with GitHub Actions for build/test/deploy pipelines
+- Horizontal scaling behind a load balancer
+
+---
+
+## License
+
+Proprietary — internal or client-facing deployments only.
