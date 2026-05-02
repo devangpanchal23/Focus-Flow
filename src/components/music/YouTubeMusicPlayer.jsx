@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Music2, Loader2, Trash2, ListMusic } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { createDebounced, patchUserState } from '../../utils/userStateSync';
+import { readUiSnapshot } from '../../utils/readUiSnapshot';
 
 export default function YouTubeMusicPlayer() {
+    const { getToken } = useAuth();
     const [youtubeUrl, setYoutubeUrl] = useState('');
     const [playlist, setPlaylist] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
@@ -22,6 +26,12 @@ export default function YouTubeMusicPlayer() {
 
     const resumeStateRef = useRef(null);
 
+    const debouncedYoutubePersist = useMemo(
+        () =>
+            createDebounced((body) => patchUserState(getToken, { uiState: { youtubeMusic: body } }), 1400),
+        [getToken]
+    );
+
     // Load YouTube IFrame API
     useEffect(() => {
         if (window.YT && window.YT.Player) {
@@ -38,33 +48,65 @@ export default function YouTubeMusicPlayer() {
         };
     }, []);
 
-    // Load saved state from localStorage
+    const hydrateFromYoutubeSnapshot = useCallback((ym) => {
+        if (!ym || typeof ym !== 'object') return false;
+        const {
+            playlist: savedPlaylist,
+            currentIndex: savedIndex,
+            volume: savedVolume,
+            currentTime: savedTime,
+            isPlaying: savedIsPlaying,
+            isMuted: savedMuted,
+        } = ym;
+        if (!savedPlaylist?.length) return false;
+        setPlaylist(savedPlaylist);
+        const idx = Math.min(
+            typeof savedIndex === 'number' ? savedIndex : 0,
+            Math.max(0, savedPlaylist.length - 1)
+        );
+        setCurrentIndex(idx);
+        setVolume(savedVolume ?? 50);
+        if (typeof savedMuted === 'boolean') setIsMuted(savedMuted);
+        if (savedTime || savedIsPlaying) {
+            resumeStateRef.current = {
+                time: savedTime || 0,
+                isPlaying: Boolean(savedIsPlaying),
+            };
+        }
+        return true;
+    }, []);
+
+    // Load from Mongo-backed snapshot → localStorage
     useEffect(() => {
+        try {
+            const ym = readUiSnapshot()?.uiState?.youtubeMusic;
+            if (hydrateFromYoutubeSnapshot(ym)) {
+                setIsInitialized(true);
+                return;
+            }
+        } catch (e) {
+            console.warn('Youtube hydrate from snapshot failed:', e);
+        }
         const savedState = localStorage.getItem('youtube-music-player');
         if (savedState) {
             try {
                 const parsedState = JSON.parse(savedState);
-                const { playlist: savedPlaylist, currentIndex: savedIndex, volume: savedVolume, currentTime: savedTime, isPlaying: savedIsPlaying } = parsedState;
-
-                if (savedPlaylist && savedPlaylist.length > 0) {
-                    setPlaylist(savedPlaylist);
-                    setCurrentIndex(savedIndex || 0);
-                    setVolume(savedVolume || 50);
-
-                    // Store resume state to be used when player is ready
-                    if (savedTime || savedIsPlaying) {
-                        resumeStateRef.current = {
-                            time: savedTime || 0,
-                            isPlaying: savedIsPlaying || false
-                        };
-                    }
-                }
+                hydrateFromYoutubeSnapshot(parsedState);
             } catch (e) {
                 console.error('Failed to load saved state:', e);
             }
         }
         setIsInitialized(true);
-    }, []);
+    }, [hydrateFromYoutubeSnapshot]);
+
+    useEffect(() => {
+        const onHydrate = (e) => {
+            const ym = e.detail?.uiState?.youtubeMusic;
+            hydrateFromYoutubeSnapshot(ym);
+        };
+        window.addEventListener('user_ui_hydrate', onHydrate);
+        return () => window.removeEventListener('user_ui_hydrate', onHydrate);
+    }, [hydrateFromYoutubeSnapshot]);
 
     // Save state to localStorage (General updates + beforeunload)
     useEffect(() => {
@@ -76,13 +118,23 @@ export default function YouTubeMusicPlayer() {
                     playlist,
                     currentIndex,
                     volume,
+                    isMuted,
                     // Get latest values from player if available, else use state
                     currentTime: playerInstanceRef.current && playerInstanceRef.current.getCurrentTime ? playerInstanceRef.current.getCurrentTime() : currentTime,
                     isPlaying: playerInstanceRef.current && playerInstanceRef.current.getPlayerState ? playerInstanceRef.current.getPlayerState() === 1 : isPlaying
                 };
                 localStorage.setItem('youtube-music-player', JSON.stringify(currentState));
+                debouncedYoutubePersist(currentState);
             } else {
                 localStorage.removeItem('youtube-music-player');
+                debouncedYoutubePersist({
+                    playlist: [],
+                    currentIndex: 0,
+                    volume: 50,
+                    currentTime: 0,
+                    isPlaying: false,
+                    isMuted: false,
+                });
             }
         };
 
@@ -94,7 +146,16 @@ export default function YouTubeMusicPlayer() {
         window.addEventListener('beforeunload', handleBeforeUnload);
 
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, [playlist, currentIndex, volume, currentTime, isPlaying, isInitialized]);
+    }, [
+        playlist,
+        currentIndex,
+        volume,
+        currentTime,
+        isPlaying,
+        isMuted,
+        isInitialized,
+        debouncedYoutubePersist,
+    ]);
 
     // Initialize player when currentIndex changes
     useEffect(() => {

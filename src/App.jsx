@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { SignedIn, SignedOut, SignIn, SignUp, useUser, useAuth } from '@clerk/clerk-react';
 
@@ -24,6 +24,23 @@ import GlobalTimer from './components/GlobalTimer';
 import ErrorBoundary from './components/ErrorBoundary';
 import PremiumFeatureWrapper from './components/common/PremiumFeatureWrapper.jsx';
 import { getEffectiveRole } from './utils/accessControl';
+import { logAppSession, patchUserState, createDebounced } from './utils/userStateSync';
+import { useSyncSettingsToMongo } from './hooks/useSyncSettingsToMongo';
+import { writeUiSnapshot, clearUiSnapshot } from './utils/readUiSnapshot';
+
+/** Tabs that exist in routing / sidebar ids (premium gating clamps via userRole separately). */
+const KNOWN_APP_TAB_IDS = new Set([
+  'dashboard',
+  'tasks',
+  'focus',
+  'calendar',
+  'web-block',
+  'habit-tracker',
+  'journal',
+  'analytics',
+  'notifications',
+  'settings',
+]);
 
 function MainApp() {
   const { user: currentUser } = useUser();
@@ -35,9 +52,21 @@ function MainApp() {
   
   const [backendUser, setBackendUser] = useState(null);
 
+  const { markPreferencesHydrated } = useSyncSettingsToMongo(getToken, !!currentUser?.id);
+
+  const debouncedSaveTab = useMemo(
+    () => createDebounced((tab) => patchUserState(getToken, { uiState: { lastActiveTab: tab } }), 800),
+    [getToken]
+  );
+
   useEffect(() => {
     localStorage.setItem('blitzit_active_tab', activeTab);
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    debouncedSaveTab(activeTab);
+  }, [activeTab, currentUser?.id, debouncedSaveTab]);
 
   const theme = useSettingsStore((state) => state.theme);
   const { fetchTasks, setAuthToken: setTaskAuthToken } = useTaskStore();
@@ -52,18 +81,70 @@ function MainApp() {
           const token = await getToken();
           if (token) {
             localStorage.setItem('token', token); // For backward compatibility
-            
-            // Fetch backend user as the ultimate source of truth for features and roles
+            const authHeaders = {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            };
+
             try {
+              await fetch('/api/users/sync', {
+                method: 'POST',
+                headers: authHeaders,
+                body: JSON.stringify({
+                  email:
+                    currentUser.primaryEmailAddress?.emailAddress ||
+                    `${currentUser.id}@users.clerk`,
+                  displayName:
+                    currentUser.fullName ||
+                    currentUser.username ||
+                    currentUser.primaryEmailAddress?.emailAddress?.split('@')[0] ||
+                    'User',
+                  photoURL: currentUser.imageUrl || '',
+                }),
+              });
+
               const res = await fetch('/api/users/me', {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
               });
               if (res.ok) {
                 const data = await res.json();
                 setBackendUser(data.user ?? null);
+                if (data.preferences) {
+                  useSettingsStore.setState({
+                    theme: data.preferences.theme === 'dark' ? 'dark' : 'light',
+                    soundEnabled: data.preferences.soundEnabled !== false,
+                    volume:
+                      typeof data.preferences.volume === 'number'
+                        ? data.preferences.volume
+                        : 0.5,
+                  });
+                }
+                if (data.uiState?.lastActiveTab && typeof data.uiState.lastActiveTab === 'string') {
+                  const t = data.uiState.lastActiveTab;
+                  if (KNOWN_APP_TAB_IDS.has(t)) setActiveTab(t);
+                }
+                writeUiSnapshot({
+                  ts: Date.now(),
+                  uiState: data.uiState || {},
+                  preferences: data.preferences || {},
+                });
+                window.dispatchEvent(
+                  new CustomEvent('user_ui_hydrate', {
+                    detail: { uiState: data.uiState || {}, preferences: data.preferences || {} },
+                  })
+                );
+                markPreferencesHydrated();
+              } else {
+                markPreferencesHydrated();
               }
+
+              await logAppSession(getToken, {
+                path: window.location.pathname,
+                ts: Date.now(),
+              });
             } catch (err) {
-              console.error('Failed to sync backend user', err);
+              console.error('Failed to sync backend user / preferences', err);
+              markPreferencesHydrated();
             }
 
             setTaskAuthToken(token);
@@ -83,6 +164,7 @@ function MainApp() {
           console.error("Error fetching Clerk token", error);
         }
       } else {
+        clearUiSnapshot();
         useTaskStore.setState({ tasks: [], activeTaskId: null, error: null, authToken: null });
         useHabitStore.setState({ habits: [], completions: {}, error: null, authToken: null });
         useNoteStore.setState({ notes: [], error: null, authToken: null });
@@ -90,7 +172,7 @@ function MainApp() {
       }
     };
     initData();
-  }, [currentUser, getToken, fetchTasks, setTaskAuthToken, fetchHabits, setHabitAuthToken, fetchNotes, setNoteAuthToken, fetchJournalHistory, setJournalAuthToken]);
+  }, [currentUser, getToken, fetchTasks, setTaskAuthToken, fetchHabits, setHabitAuthToken, fetchNotes, setNoteAuthToken, fetchJournalHistory, setJournalAuthToken, markPreferencesHydrated]);
 
   // Derive effective role based on privileges
   const userRole = getEffectiveRole(backendUser, currentUser);
@@ -106,10 +188,11 @@ function MainApp() {
   const allowedTabs = roleToTabs[userRole] || roleToTabs.normal;
 
   useEffect(() => {
-    if (!allowedTabs.includes(activeTab)) {
+    const allowed = roleToTabs[userRole] || roleToTabs.normal;
+    if (!allowed.includes(activeTab)) {
       setActiveTab('dashboard');
     }
-  }, [activeTab, allowedTabs]);
+  }, [activeTab, userRole]);
 
   useEffect(() => {
     if (theme === 'dark') {

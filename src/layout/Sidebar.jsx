@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     LayoutDashboard,
     CheckSquare,
@@ -19,7 +19,9 @@ import {
     Bell
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useUser } from '@clerk/clerk-react';
+import { useAuth, useUser } from '@clerk/clerk-react';
+import { createDebounced, patchUserState } from '../utils/userStateSync';
+import { readUiSnapshot } from '../utils/readUiSnapshot';
 
 const DEFAULT_NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -32,8 +34,26 @@ const DEFAULT_NAV_ITEMS = [
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
+function orderIdsToNavItems(orderIds) {
+    if (!Array.isArray(orderIds) || orderIds.length !== DEFAULT_NAV_ITEMS.length)
+        return null;
+    const reordered = orderIds
+        .map((id) => DEFAULT_NAV_ITEMS.find((item) => item.id === id))
+        .filter(Boolean);
+    return reordered.length === DEFAULT_NAV_ITEMS.length ? reordered : null;
+}
+
 export default function Sidebar({ activeTab, setActiveTab, effectiveRole: roleFromBackend }) {
     const { user: currentUser } = useUser();
+    const { getToken } = useAuth();
+
+    const debouncedSaveSidebarOrder = useMemo(
+        () =>
+            createDebounced((orderIds) => {
+                patchUserState(getToken, { uiState: { sidebarOrder: orderIds } });
+            }, 900),
+        [getToken]
+    );
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [isRearranging, setIsRearranging] = useState(false);
@@ -93,28 +113,36 @@ export default function Sidebar({ activeTab, setActiveTab, effectiveRole: roleFr
         };
     }, []);
 
-    // Initialize items from localStorage or default
+    // Initialize items from Mongo snapshot → localStorage → default
     const [navItems, setNavItems] = useState(() => {
         try {
+            const fromMongoIds = readUiSnapshot()?.uiState?.sidebarOrder;
+            const fromMongoItems = orderIdsToNavItems(fromMongoIds);
+            if (fromMongoItems) return fromMongoItems;
+
             const savedOrder = localStorage.getItem('sidebarOrder');
             if (savedOrder) {
                 const savedIds = JSON.parse(savedOrder);
-                // Map saved IDs back to full item objects
-                const reordered = savedIds
-                    .map(id => DEFAULT_NAV_ITEMS.find(item => item.id === id))
-                    .filter(Boolean);
-
-                // If length matches, we assume data is good. 
-                // (In a real app, you'd merge new default items here too)
-                if (reordered.length === DEFAULT_NAV_ITEMS.length) {
-                    return reordered;
-                }
+                const fromLs = orderIdsToNavItems(savedIds);
+                if (fromLs) return fromLs;
             }
         } catch (error) {
-            console.error("Failed to load sidebar order", error);
+            console.error('Failed to load sidebar order', error);
         }
         return DEFAULT_NAV_ITEMS;
     });
+
+    useEffect(() => {
+        const onHydrate = (e) => {
+            const orderIds = e.detail?.uiState?.sidebarOrder;
+            const ordered = orderIdsToNavItems(orderIds);
+            if (!ordered) return;
+            setNavItems(ordered);
+            localStorage.setItem('sidebarOrder', JSON.stringify(orderIds));
+        };
+        window.addEventListener('user_ui_hydrate', onHydrate);
+        return () => window.removeEventListener('user_ui_hydrate', onHydrate);
+    }, []);
 
     const visibleNavItems = navItems.filter(i => allowedIds.includes(i.id));
 
@@ -137,6 +165,7 @@ export default function Sidebar({ activeTab, setActiveTab, effectiveRole: roleFr
         // Persist order
         const orderIds = newItems.map(item => item.id);
         localStorage.setItem('sidebarOrder', JSON.stringify(orderIds));
+        debouncedSaveSidebarOrder(orderIds);
     };
 
     return (

@@ -1,11 +1,41 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '@clerk/clerk-react';
 import { useTaskStore } from '../../store/useTaskStore';
 import { useTimerStore } from '../../store/useTimerStore';
+import { createDebounced, patchUserState } from '../../utils/userStateSync';
+import { readUiSnapshot } from '../../utils/readUiSnapshot';
 import { Play, Pause, Square, Clock, CheckCircle2, Zap, PartyPopper } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import confetti from 'canvas-confetti';
 
+function initialFocusDraft() {
+    const snapFs = readUiSnapshot()?.uiState?.focusSession;
+    if (snapFs && typeof snapFs === 'object') {
+        return {
+            selectedTaskId:
+                snapFs.selectedTaskId != null ? String(snapFs.selectedTaskId) : '',
+            estimatedSeconds:
+                typeof snapFs.estimatedSeconds === 'number' ? snapFs.estimatedSeconds : null,
+        };
+    }
+    try {
+        const savedState = localStorage.getItem('focusSessionLocalState');
+        if (savedState) {
+            const parsed = JSON.parse(savedState);
+            return {
+                selectedTaskId: parsed.selectedTaskId ? String(parsed.selectedTaskId) : '',
+                estimatedSeconds:
+                    typeof parsed.estimatedSeconds === 'number' ? parsed.estimatedSeconds : null,
+            };
+        }
+    } catch {
+        /* ignore */
+    }
+    return { selectedTaskId: '', estimatedSeconds: null };
+}
+
 export default function FocusSessionManager({ tasks, onTaskUpdate }) {
+    const { getToken } = useAuth();
     const { activeTaskId, setActiveTask, toggleTask } = useTaskStore();
     const {
         isActive,
@@ -20,9 +50,21 @@ export default function FocusSessionManager({ tasks, onTaskUpdate }) {
         setTime
     } = useTimerStore();
 
-    const [selectedTaskId, setSelectedTaskId] = useState(activeTaskId || '');
-    // Initialize with 0, will be set by effect
-    const [estimatedSeconds, setEstimatedSeconds] = useState(0);
+    const draft = initialFocusDraft();
+    const [selectedTaskId, setSelectedTaskId] = useState(
+        draft.selectedTaskId || activeTaskId || ''
+    );
+    const [estimatedSeconds, setEstimatedSeconds] = useState(
+        draft.estimatedSeconds ?? 0
+    );
+
+    const debouncedPersistFocus = useMemo(
+        () =>
+            createDebounced((snap) => {
+                patchUserState(getToken, { uiState: { focusSession: snap } });
+            }, 900),
+        [getToken]
+    );
     const [mode, setMode] = useState('selection'); // 'selection', 'active'
     const [showSuccess, setShowSuccess] = useState(false);
 
@@ -39,22 +81,27 @@ export default function FocusSessionManager({ tasks, onTaskUpdate }) {
     // to avoid conflicts with the store's hydration.
 
     useEffect(() => {
-        const savedState = localStorage.getItem('focusSessionLocalState');
-        if (savedState) {
-            const parsed = JSON.parse(savedState);
-            if (parsed.selectedTaskId) setSelectedTaskId(parsed.selectedTaskId);
-            if (parsed.estimatedSeconds) setEstimatedSeconds(parsed.estimatedSeconds);
-        }
+        const onHydrate = (e) => {
+            const fs = e.detail?.uiState?.focusSession;
+            if (!fs || typeof fs !== 'object') return;
+            if (fs.selectedTaskId != null) setSelectedTaskId(String(fs.selectedTaskId));
+            if (typeof fs.estimatedSeconds === 'number') setEstimatedSeconds(fs.estimatedSeconds);
+        };
+        window.addEventListener('user_ui_hydrate', onHydrate);
+        return () => window.removeEventListener('user_ui_hydrate', onHydrate);
     }, []);
 
     useEffect(() => {
-        // Save only local UI state, not the timer state
-        localStorage.setItem('focusSessionLocalState', JSON.stringify({
-            selectedTaskId,
-            estimatedSeconds,
-            lastTimestamp: Date.now()
-        }));
-    }, [selectedTaskId, estimatedSeconds]);
+        localStorage.setItem(
+            'focusSessionLocalState',
+            JSON.stringify({
+                selectedTaskId,
+                estimatedSeconds,
+                lastTimestamp: Date.now(),
+            })
+        );
+        debouncedPersistFocus({ selectedTaskId, estimatedSeconds });
+    }, [selectedTaskId, estimatedSeconds, debouncedPersistFocus]);
 
     // Sync local selection with global active task
     useEffect(() => {

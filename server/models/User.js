@@ -77,6 +77,24 @@ const UserSchema = new mongoose.Schema({
     lastTransactionId: {
         type: String,
     },
+    /** Client settings (persisted so Compass shows per-user prefs) */
+    preferences: {
+        theme: {
+            type: String,
+            enum: ['light', 'dark'],
+            default: 'light',
+        },
+        soundEnabled: { type: Boolean, default: true },
+        volume: { type: Number, default: 0.5, min: 0, max: 1 },
+    },
+    /** Component UI snapshots: sidebar order, last tab, focus/youtube auxiliary state */
+    uiState: {
+        sidebarOrder: { type: [String], default: [] },
+        lastActiveTab: { type: String, default: 'dashboard' },
+        focusSession: { type: mongoose.Schema.Types.Mixed },
+        youtubeMusic: { type: mongoose.Schema.Types.Mixed },
+    },
+    lastSyncAt: Date,
 });
 
 export default mongoose.model('User', UserSchema);

@@ -1,6 +1,7 @@
 import express from 'express';
 import Task from '../models/Task.js';
 import DailyStats from '../models/DailyStats.js';
+import User from '../models/User.js';
 import { format } from 'date-fns';
 import { verifyToken } from '../middleware/auth.js';
 import {
@@ -10,6 +11,24 @@ import {
 } from '../utils/taskDates.js';
 
 const router = express.Router();
+
+const getUserIdentityForDailyStats = async (userId) => {
+    const user = await User.findOne({ userId })
+        .select('email displayName')
+        .lean();
+    const identityUpdate = {};
+    if (user?.email) identityUpdate.userEmail = user.email;
+    if (user?.displayName) identityUpdate.userDisplayName = user.displayName;
+    return identityUpdate;
+};
+
+const buildDailyStatsUpdate = (incUpdate, identityUpdate) => {
+    const update = { $inc: incUpdate };
+    if (identityUpdate && Object.keys(identityUpdate).length > 0) {
+        update.$set = identityUpdate;
+    }
+    return update;
+};
 
 // Apply auth middleware to all routes
 router.use(verifyToken);
@@ -115,12 +134,13 @@ router.post('/', async (req, res) => {
 
         // Update Daily Stats for Creation (by scheduled day, not createdAt)
         try {
+            const identityUpdate = await getUserIdentityForDailyStats(req.user.uid);
             const statDay = newTask.scheduledDate
                 ? new Date(newTask.scheduledDate).toISOString().slice(0, 10)
                 : format(new Date(), 'yyyy-MM-dd');
             await DailyStats.findOneAndUpdate(
                 { date: statDay, userId: req.user.uid },
-                { $inc: { tasksCreated: 1 } },
+                buildDailyStatsUpdate({ tasksCreated: 1 }, identityUpdate),
                 { upsert: true, new: true }
             );
         } catch (statsErr) {
@@ -178,9 +198,10 @@ router.patch('/:id', async (req, res) => {
 
         if (isCompleting) {
             const today = format(new Date(), 'yyyy-MM-dd');
+            const identityUpdate = await getUserIdentityForDailyStats(req.user.uid);
             await DailyStats.findOneAndUpdate(
                 { date: today, userId: req.user.uid },
-                { $inc: { tasksCompleted: 1 } },
+                buildDailyStatsUpdate({ tasksCompleted: 1 }, identityUpdate),
                 { upsert: true, new: true }
             );
         }
@@ -234,9 +255,10 @@ router.post('/:id/log-time', async (req, res) => {
 
         // Update Daily Stats
         const today = format(new Date(), 'yyyy-MM-dd');
+        const identityUpdate = await getUserIdentityForDailyStats(req.user.uid);
         await DailyStats.findOneAndUpdate(
             { date: today, userId: req.user.uid },
-            { $inc: { totalFocusTime: duration } },
+            buildDailyStatsUpdate({ totalFocusTime: duration }, identityUpdate),
             { upsert: true, new: true }
         );
 

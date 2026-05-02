@@ -5,6 +5,12 @@ const DailyStatsSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    userEmail: {
+        type: String
+    },
+    userDisplayName: {
+        type: String
+    },
     date: {
         type: String, // Storing as YYYY-MM-DD string for easy querying/grouping
         required: true,
@@ -44,5 +50,7 @@ const DailyStatsSchema = new mongoose.Schema({
 });
 
 DailyStatsSchema.index({ userId: 1, date: 1 }, { unique: true });
+DailyStatsSchema.index({ userEmail: 1 });
+DailyStatsSchema.index({ userDisplayName: 1 });
 
 export default mongoose.model('DailyStats', DailyStatsSchema);
