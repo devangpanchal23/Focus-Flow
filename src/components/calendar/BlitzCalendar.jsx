@@ -1,12 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X, Clock, Check, Trash2 } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, isSameDay, subDays, addDays } from 'date-fns';
 import { useTaskStore } from '../../store/useTaskStore';
 
 export default function Calendar() {
-    const { tasks, addTask, updateTask, deleteTask } = useTaskStore();
-    const [currentDate, setCurrentDate] = useState(new Date());
+    const { addTask, updateTask, deleteTask, selectedDate, setSelectedDate } = useTaskStore();
+    const [currentDate, setCurrentDate] = useState(() => {
+        const sd = useTaskStore.getState().selectedDate;
+        return new Date(sd.getFullYear(), sd.getMonth(), 1);
+    });
     const [view, setView] = useState('month'); // 'month' or 'day'
-    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [calendarTasks, setCalendarTasks] = useState([]);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
     const [newTask, setNewTask] = useState({
@@ -16,6 +20,27 @@ export default function Calendar() {
         scheduledTime: '',
         priority: 'medium'
     });
+
+    const loadMonthTasks = useCallback(async () => {
+        const tokenFn = useTaskStore.getState().getToken;
+        const token = tokenFn ? await tokenFn() : useTaskStore.getState().authToken;
+        if (!token) return;
+        const rs = format(startOfMonth(currentDate), 'yyyy-MM-dd');
+        const re = format(endOfMonth(currentDate), 'yyyy-MM-dd');
+        try {
+            const res = await fetch(
+                `/api/tasks?rangeStart=${encodeURIComponent(rs)}&rangeEnd=${encodeURIComponent(re)}`,
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+            if (res.ok) setCalendarTasks(await res.json());
+        } catch (e) {
+            console.error('Calendar task load failed', e);
+        }
+    }, [currentDate]);
+
+    useEffect(() => {
+        loadMonthTasks();
+    }, [loadMonthTasks]);
 
     // Generate time slots for day view (30-minute intervals) 12:00 AM to 12:00 AM (next day)
     const generateTimeSlots = () => {
@@ -119,26 +144,17 @@ export default function Calendar() {
         setCurrentDate(new Date(currentDate.getFullYear() + 1, currentDate.getMonth()));
     };
 
-    // Get tasks for a specific date
     const getTasksForDate = (date) => {
-        return tasks.filter(task => {
+        return calendarTasks.filter((task) => {
             if (!task.scheduledDate) return false;
-            // Compare local date strings to avoid timezone offset issues if possible
-            // Using toDateString() is generally safe for dates created in same timezone
-            const taskDate = new Date(task.scheduledDate);
-            return taskDate.toDateString() === date.toDateString();
+            return isSameDay(new Date(task.scheduledDate), date);
         });
     };
 
-    // Get tasks for a specific time slot
     const getTasksForTimeSlot = (date, hour, minute) => {
-        return tasks.filter(task => {
-            // Task must be on this date
+        return calendarTasks.filter((task) => {
             if (!task.scheduledDate || !task.scheduledTime) return false;
-            const taskDate = new Date(task.scheduledDate);
-            if (taskDate.toDateString() !== date.toDateString()) return false;
-
-            // Task must match the time slot start
+            if (!isSameDay(new Date(task.scheduledDate), date)) return false;
             const [taskHour, taskMinute] = task.scheduledTime.split(':').map(Number);
             return taskHour === hour && taskMinute === minute;
         });
@@ -155,11 +171,11 @@ export default function Calendar() {
             scheduledDate: newTask.scheduledDate,
             scheduledTime: newTask.scheduledTime,
             completed: false,
-            createdAt: new Date() // Add creation time for sorting if needed
         };
 
         try {
             await addTask(taskData);
+            await loadMonthTasks();
             setShowCreateModal(false);
             setNewTask({
                 title: '',
@@ -261,7 +277,11 @@ export default function Calendar() {
                             )}
                             {view === 'day' && (
                                 <button
-                                    onClick={() => setSelectedDate(new Date(selectedDate.getTime() - 86400000))}
+                                    onClick={() => {
+                                        const d = subDays(selectedDate, 1);
+                                        setSelectedDate(d);
+                                        useTaskStore.getState().fetchTasks(d);
+                                    }}
                                     className="p-2 hover:bg-white/50 dark:hover:bg-slate-700/50 rounded-lg transition-colors"
                                     title="Previous Day"
                                 >
@@ -291,7 +311,11 @@ export default function Calendar() {
                             )}
                             {view === 'day' && (
                                 <button
-                                    onClick={() => setSelectedDate(new Date(selectedDate.getTime() + 86400000))}
+                                    onClick={() => {
+                                        const d = addDays(selectedDate, 1);
+                                        setSelectedDate(d);
+                                        useTaskStore.getState().fetchTasks(d);
+                                    }}
                                     className="p-2 hover:bg-white/50 dark:hover:bg-slate-700/50 rounded-lg transition-colors"
                                     title="Next Day"
                                 >
@@ -306,8 +330,9 @@ export default function Calendar() {
                         <button
                             onClick={() => {
                                 const today = new Date();
-                                setCurrentDate(today);
+                                setCurrentDate(new Date(today.getFullYear(), today.getMonth(), 1));
                                 setSelectedDate(today);
+                                useTaskStore.getState().fetchTasks(today);
                             }}
                             className="px-4 py-2 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg font-medium hover:shadow-md transition-all text-sm"
                         >
@@ -340,6 +365,7 @@ export default function Calendar() {
                                         key={index}
                                         onClick={() => {
                                             setSelectedDate(dayObj.date);
+                                            useTaskStore.getState().fetchTasks(dayObj.date);
                                             setView('day');
                                         }}
                                         className={`min-h-[80px] md:min-h-[120px] p-2 rounded-xl border-2 cursor-pointer transition-all hover:shadow-lg ${!dayObj.isCurrentMonth
@@ -369,7 +395,7 @@ export default function Calendar() {
                                         <div className="space-y-1 overflow-hidden">
                                             {dayTasks.slice(0, 3).map((task, i) => (
                                                 <div
-                                                    key={task._id}
+                                                    key={task.id}
                                                     className={`text-xs p-1 rounded truncate ${task.completed
                                                         ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 line-through'
                                                         : task.priority === 'high'
@@ -448,7 +474,7 @@ export default function Calendar() {
                                                 <div className="space-y-2">
                                                     {slotTasks.map(task => (
                                                         <div
-                                                            key={task._id}
+                                                            key={task.id}
                                                             className={`p-3 rounded-lg border-l-4 ${task.completed
                                                                 ? 'bg-green-50 dark:bg-green-900/20 border-green-500'
                                                                 : task.priority === 'high'
@@ -498,7 +524,10 @@ export default function Calendar() {
                                                                 </div>
                                                                 <div className="flex gap-1">
                                                                     <button
-                                                                        onClick={() => updateTask(task._id, { completed: !task.completed })}
+                                                                        onClick={async () => {
+                                                                            await updateTask(task.id, { completed: !task.completed });
+                                                                            await loadMonthTasks();
+                                                                        }}
                                                                         className={`p-1.5 rounded-lg transition-colors ${task.completed
                                                                             ? 'bg-green-500 text-white'
                                                                             : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-green-500 hover:text-white'
@@ -508,7 +537,10 @@ export default function Calendar() {
                                                                         <Check size={16} />
                                                                     </button>
                                                                     <button
-                                                                        onClick={() => deleteTask(task._id)}
+                                                                        onClick={async () => {
+                                                                            await deleteTask(task.id);
+                                                                            await loadMonthTasks();
+                                                                        }}
                                                                         className="p-1.5 bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-red-500 hover:text-white rounded-lg transition-colors"
                                                                         title="Delete task"
                                                                     >

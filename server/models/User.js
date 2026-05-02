@@ -11,10 +11,7 @@ const UserSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
-    password: {
-        type: String,
-        required: true
-    },
+
     displayName: {
         type: String
     },
@@ -66,7 +63,20 @@ const UserSchema = new mongoose.Schema({
     razorpay_payment_id: String,
     razorpay_order_id: String,
     razorpay_signature: String,
-    premiumActivatedAt: Date
+    premiumActivatedAt: Date,
+    planType: {
+        type: String,
+        enum: ['free', 'pro', 'full'],
+        default: 'free'
+    },
+    paymentStatus: {
+        type: String,
+        default: 'pending'
+    },
+    planExpiry: Date,
+    lastTransactionId: {
+        type: String,
+    },
 });
 
 export default mongoose.model('User', UserSchema);

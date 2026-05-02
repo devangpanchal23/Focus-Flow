@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { Zap, ShieldAlert, CopyCheck } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useUser, useAuth } from '@clerk/clerk-react';
 
 export default function AccessRequestCard() {
-    const { currentUser } = useAuth();
+    const { user: currentUser } = useUser();
+    const { getToken } = useAuth();
     const [requesting, setRequesting] = useState(false);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
 
-    const userRole = currentUser?.role || 'normal';
+    const publicMetadata = currentUser?.publicMetadata || {};
+    const userRole = publicMetadata.role || 'normal';
     const canRequestPro = userRole === 'normal';
     const canRequestFull = userRole === 'normal' || userRole === 'pro';
 
@@ -18,7 +20,7 @@ export default function AccessRequestCard() {
             setMessage('');
             setError('');
 
-            const token = localStorage.getItem('token');
+            const token = await getToken();
             const res = await fetch('/api/upgrade/request', {
                 method: 'POST',
                 headers: {

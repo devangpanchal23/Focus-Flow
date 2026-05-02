@@ -1,35 +1,72 @@
 import express from 'express';
 import Task from '../models/Task.js';
 import DailyStats from '../models/DailyStats.js';
-import { startOfDay, endOfDay, format } from 'date-fns';
+import { format } from 'date-fns';
 import { verifyToken } from '../middleware/auth.js';
+import {
+    utcDayBoundsFromYyyyMmDd,
+    normalizeIncomingScheduledDate,
+    rangeFromIsoParams,
+} from '../utils/taskDates.js';
 
 const router = express.Router();
 
 // Apply auth middleware to all routes
 router.use(verifyToken);
 
-// Get all tasks or filter by date range
+// Get all tasks or filter by scheduledDate (never createdAt)
 router.get('/', async (req, res) => {
     try {
-        const { start, end } = req.query;
+        const { start, end, date, rangeStart, rangeEnd } = req.query;
         let query = { userId: req.user.uid };
 
-        if (start && end) {
-            query.createdAt = {
-                $gte: new Date(start),
-                $lte: new Date(end)
+        if (rangeStart && rangeEnd) {
+            const b1 = utcDayBoundsFromYyyyMmDd(rangeStart);
+            const b2 = utcDayBoundsFromYyyyMmDd(rangeEnd);
+            if (!b1 || !b2) {
+                return res.status(400).json({ message: 'Invalid rangeStart or rangeEnd (use yyyy-MM-dd)' });
+            }
+            query.scheduledDate = {
+                $gte: b1.start,
+                $lte: b2.end,
             };
-        } else if (req.query.date) {
-            // Fallback for date param just in case
-            const date = req.query.date;
-            query.createdAt = {
-                $gte: startOfDay(new Date(date)),
-                $lte: endOfDay(new Date(date))
+        } else if (start && end) {
+            const r = rangeFromIsoParams(start, end);
+            if (!r) {
+                return res.status(400).json({ message: 'Invalid start or end ISO date' });
+            }
+            query.scheduledDate = {
+                $gte: r.start,
+                $lte: r.end,
+            };
+        } else if (date) {
+            const bounds =
+                utcDayBoundsFromYyyyMmDd(date) ||
+                (() => {
+                    const parsed = normalizeIncomingScheduledDate(date);
+                    if (!parsed) return null;
+                    const y = parsed.getUTCFullYear();
+                    const m = parsed.getUTCMonth();
+                    const d = parsed.getUTCDate();
+                    return {
+                        start: new Date(Date.UTC(y, m, d, 0, 0, 0, 0)),
+                        end: new Date(Date.UTC(y, m, d, 23, 59, 59, 999)),
+                    };
+                })();
+            if (!bounds) {
+                return res.status(400).json({ message: 'Invalid date query' });
+            }
+            query.scheduledDate = {
+                $gte: bounds.start,
+                $lte: bounds.end,
             };
         }
 
-        const tasks = await Task.find(query).sort({ createdAt: -1 });
+        const tasks = await Task.find(query).sort({
+            scheduledDate: 1,
+            scheduledTime: 1,
+            createdAt: -1,
+        });
 
         // Transform _id to id for frontend compatibility
         const formattedTasks = tasks.map(task => ({
@@ -61,6 +98,8 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ message: 'Task title is required' });
         }
 
+        const scheduledDate = normalizeIncomingScheduledDate(req.body.scheduledDate);
+
         const task = new Task({
             userId: req.user.uid,
             title: req.body.title,
@@ -68,19 +107,19 @@ router.post('/', async (req, res) => {
             priority: req.body.priority || 'medium',
             project: req.body.project || 'Inbox',
             estimatedTime: req.body.estimatedTime || 0,
-            createdAt: req.body.createdAt || Date.now(), // Use provided date or default to now
-            scheduledDate: req.body.scheduledDate,
-            scheduledTime: req.body.scheduledTime
+            scheduledDate: scheduledDate || undefined,
+            scheduledTime: req.body.scheduledTime,
         });
 
         const newTask = await task.save();
 
-        // Update Daily Stats for Creation
+        // Update Daily Stats for Creation (by scheduled day, not createdAt)
         try {
-            // Use the task's createdAt date for stats so it aligns with the task's "day"
-            const taskDate = format(new Date(newTask.createdAt), 'yyyy-MM-dd');
+            const statDay = newTask.scheduledDate
+                ? new Date(newTask.scheduledDate).toISOString().slice(0, 10)
+                : format(new Date(), 'yyyy-MM-dd');
             await DailyStats.findOneAndUpdate(
-                { date: taskDate, userId: req.user.uid },
+                { date: statDay, userId: req.user.uid },
                 { $inc: { tasksCreated: 1 } },
                 { upsert: true, new: true }
             );
@@ -126,7 +165,10 @@ router.patch('/:id', async (req, res) => {
         if (req.body.priority != null) task.priority = req.body.priority;
         if (req.body.project != null) task.project = req.body.project;
         if (req.body.estimatedTime != null) task.estimatedTime = req.body.estimatedTime;
-        if (req.body.scheduledDate != null) task.scheduledDate = req.body.scheduledDate;
+        if (req.body.scheduledDate != null) {
+            task.scheduledDate =
+                normalizeIncomingScheduledDate(req.body.scheduledDate) || undefined;
+        }
         if (req.body.scheduledTime != null) task.scheduledTime = req.body.scheduledTime;
 
         // Check if task is being completed

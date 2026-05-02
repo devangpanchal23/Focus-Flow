@@ -1,26 +1,15 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
 import UpgradeDialog from './UpgradeDialog';
+import { hasAccess } from '../../utils/accessControl';
 
-const PremiumFeatureWrapper = ({ feature, requiredRole, children }) => {
-    const { currentUser } = useAuth();
+const PremiumFeatureWrapper = ({ feature, requiredRole, currentRole, children }) => {
     const [showDialog, setShowDialog] = useState(true);
 
-    if (currentUser?.role === 'admin' || currentUser?.role === 'moderator') {
+    if (hasAccess(currentRole, requiredRole)) {
         return children;
     }
 
-    const requiresFull = requiredRole === 'full';
-    let hasAccess = false;
-
-    if (requiresFull) {
-        hasAccess = !!currentUser?.hasFullAccess;
-    } else {
-        hasAccess = !!currentUser?.hasPro;
-    }
-
-    if (!hasAccess) {
-        return (
+    return (
             <UpgradeDialog
                 isOpen={showDialog}
                 featureName={feature}
@@ -36,9 +25,6 @@ const PremiumFeatureWrapper = ({ feature, requiredRole, children }) => {
                 }}
             />
         );
-    }
-
-    return children;
 };
 
 export default PremiumFeatureWrapper;

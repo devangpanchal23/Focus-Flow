@@ -1,7 +1,18 @@
 import { create } from 'zustand';
-import { format, startOfDay, endOfDay } from 'date-fns';
+import { format, startOfDay } from 'date-fns';
 
 const API_URL = '/api/tasks';
+
+function calendarDayString(d) {
+    return format(startOfDay(d), 'yyyy-MM-dd');
+}
+
+/** Normalize server stored instant to local calendar midnight for consistent ?date= YYYY-MM-DD */
+function localDateFromStoredScheduled(stored) {
+    const iso = typeof stored === 'string' ? stored : new Date(stored).toISOString();
+    const [y, m, day] = iso.slice(0, 10).split('-').map(Number);
+    return new Date(y, m - 1, day);
+}
 
 export const useTaskStore = create((set, get) => ({
     tasks: [],
@@ -10,25 +21,23 @@ export const useTaskStore = create((set, get) => ({
     isLoading: false,
     error: null,
     authToken: null,
+    getToken: null,
 
     setAuthToken: (token) => set({ authToken: token }),
+    setGetToken: (fn) => set({ getToken: fn }),
 
-    fetchTasks: async () => {
-        const token = get().authToken;
+    fetchTasks: async (dateOverride) => {
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         if (!token) return;
 
         set({ isLoading: true });
         try {
-            const date = get().selectedDate;
-            let url = API_URL;
-            if (date) {
-                const start = startOfDay(date).toISOString();
-                const end = endOfDay(date).toISOString();
-                url = `${API_URL}?start=${start}&end=${end}`;
-            }
+            const day = calendarDayString(dateOverride ?? get().selectedDate);
+            const url = `${API_URL}?date=${encodeURIComponent(day)}`;
 
             const response = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
             });
             if (!response.ok) throw new Error('Failed to fetch tasks');
             const data = await response.json();
@@ -39,32 +48,36 @@ export const useTaskStore = create((set, get) => ({
     },
 
     addTask: async (titleOrData, priority = 'medium', project = 'Inbox', estimatedTime = 0) => {
-        const token = get().authToken;
-        const selectedDate = get().selectedDate;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
+        const dayStr = calendarDayString(get().selectedDate);
 
         try {
-            let body = {};
+            let body;
 
             if (typeof titleOrData === 'object') {
                 body = { ...titleOrData };
                 if (!body.project) body.project = 'Inbox';
-                // If createdAt is passed (e.g. from Calendar), use it, otherwise use selectedDate
-                if (!body.createdAt) body.createdAt = selectedDate;
+                if (body.scheduledDate == null || body.scheduledDate === '') {
+                    body.scheduledDate = dayStr;
+                }
             } else {
                 body = {
                     title: titleOrData,
                     priority,
                     project,
                     estimatedTime,
-                    createdAt: selectedDate
+                    scheduledDate: dayStr,
                 };
             }
+
+            delete body.createdAt;
 
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify(body),
             });
@@ -74,8 +87,12 @@ export const useTaskStore = create((set, get) => ({
                 throw new Error(errorData.message || 'Failed to create task');
             }
 
-            const newTask = await response.json();
-            set((state) => ({ tasks: [newTask, ...state.tasks] }));
+            const created = await response.json();
+            let refetchDate = get().selectedDate;
+            if (created.scheduledDate) {
+                refetchDate = localDateFromStoredScheduled(created.scheduledDate);
+            }
+            await get().fetchTasks(refetchDate);
         } catch (err) {
             console.error('Failed to add task:', err);
             throw err;
@@ -83,25 +100,29 @@ export const useTaskStore = create((set, get) => ({
     },
 
     updateTask: async (id, updates) => {
-        const token = get().authToken;
-        // Optimistic update
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         set((state) => ({
-            tasks: state.tasks.map((t) => t.id === id ? { ...t, ...updates } : t)
+            tasks: state.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
         }));
 
         try {
+            const patchBody = { ...updates };
+            if (patchBody.scheduledDate != null && typeof patchBody.scheduledDate !== 'string') {
+                patchBody.scheduledDate = format(startOfDay(new Date(patchBody.scheduledDate)), 'yyyy-MM-dd');
+            }
+
             const response = await fetch(`${API_URL}/${id}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify(updates),
+                body: JSON.stringify(patchBody),
             });
             const updatedTask = await response.json();
-            // Sync with server response
             set((state) => ({
-                tasks: state.tasks.map((t) => t.id === id ? updatedTask : t)
+                tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
             }));
         } catch (err) {
             console.error('Failed to update task:', err);
@@ -110,13 +131,13 @@ export const useTaskStore = create((set, get) => ({
     },
 
     toggleTask: async (id) => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         const task = get().tasks.find((t) => t.id === id);
         if (!task) return;
 
-        // Optimistic update
         set((state) => ({
-            tasks: state.tasks.map((t) => t.id === id ? { ...t, completed: !t.completed } : t)
+            tasks: state.tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)),
         }));
 
         try {
@@ -124,37 +145,35 @@ export const useTaskStore = create((set, get) => ({
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ completed: !task.completed }),
             });
             const updatedTask = await response.json();
 
             set((state) => ({
-                tasks: state.tasks.map((t) => t.id === id ? updatedTask : t)
+                tasks: state.tasks.map((t) => (t.id === id ? updatedTask : t)),
             }));
-
         } catch (err) {
             console.error('Failed to toggle task:', err);
-            // Revert on failure
             set((state) => ({
-                tasks: state.tasks.map((t) => t.id === id ? { ...t, completed: task.completed } : t)
+                tasks: state.tasks.map((t) => (t.id === id ? { ...t, completed: task.completed } : t)),
             }));
         }
     },
 
     deleteTask: async (id) => {
-        const token = get().authToken;
-        // Optimistic update
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         const previousTasks = get().tasks;
         set((state) => ({
-            tasks: state.tasks.filter((t) => t.id !== id)
+            tasks: state.tasks.filter((t) => t.id !== id),
         }));
 
         try {
             await fetch(`${API_URL}/${id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { Authorization: `Bearer ${token}` },
             });
         } catch (err) {
             console.error('Failed to delete task:', err);
@@ -163,13 +182,14 @@ export const useTaskStore = create((set, get) => ({
     },
 
     logTime: async (id, duration) => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         try {
             await fetch(`${API_URL}/${id}/log-time`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ duration }),
             });
@@ -177,7 +197,7 @@ export const useTaskStore = create((set, get) => ({
             set((state) => ({
                 tasks: state.tasks.map((t) =>
                     t.id === id ? { ...t, timeSpent: (t.timeSpent || 0) + duration } : t
-                )
+                ),
             }));
         } catch (err) {
             console.error('Failed to log time:', err);

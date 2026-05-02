@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import TaskList from './TaskList';
 import PriorityBoard from './PriorityBoard';
 import EisenhowerMatrix from './EisenhowerMatrix';
@@ -6,29 +6,71 @@ import { useTaskStore } from '../../store/useTaskStore';
 import { LayoutGrid, List, Columns, Calendar as CalendarIcon } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import Calendar from '../ui/Calendar';
-import { format, isToday } from 'date-fns';
+import { format, isToday, isAfter, startOfDay, addDays } from 'date-fns';
 
 export default function Tasks() {
-    const { tasks, selectedDate, setSelectedDate, fetchTasks } = useTaskStore();
+    const { tasks, selectedDate, setSelectedDate, fetchTasks, authToken } = useTaskStore();
     const [filter, setFilter] = useState('all'); // all, today, upcoming
+    const [upcomingSlice, setUpcomingSlice] = useState([]);
     const [view, setView] = useState('list'); // list, matrix
     const [showCalendar, setShowCalendar] = useState(false);
 
     const handleDateSelect = async (date) => {
         setSelectedDate(date);
-        await fetchTasks();
+        await fetchTasks(date);
         setShowCalendar(false);
     };
 
     const handleResetToday = async () => {
         const today = new Date();
         setSelectedDate(today);
-        await fetchTasks();
+        await fetchTasks(today);
     };
 
-    const filteredTasks = tasks.filter(task => {
+    useEffect(() => {
+        fetchTasks();
+    }, [selectedDate, fetchTasks]);
+
+    useEffect(() => {
+        if (filter !== 'upcoming') {
+            setUpcomingSlice([]);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const tokenFn = useTaskStore.getState().getToken;
+            const token = tokenFn ? await tokenFn() : authToken;
+            if (!token) return;
+            const from = format(startOfDay(addDays(new Date(), 1)), 'yyyy-MM-dd');
+            const to = format(startOfDay(addDays(new Date(), 366)), 'yyyy-MM-dd');
+            try {
+                const res = await fetch(
+                    `/api/tasks?rangeStart=${encodeURIComponent(from)}&rangeEnd=${encodeURIComponent(to)}`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (!res.ok || cancelled) return;
+                const data = await res.json();
+                if (!cancelled) setUpcomingSlice(data);
+            } catch (e) {
+                console.error(e);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [filter, authToken]);
+
+    const sourceList = filter === 'upcoming' ? upcomingSlice : tasks;
+
+    const filteredTasks = sourceList.filter((task) => {
         if (filter === 'completed') return task.completed;
-        if (filter === 'today') return !task.completed; // Simplified logic
+        if (filter === 'today') {
+            return !task.completed;
+        }
+        if (filter === 'upcoming') {
+            if (!task.scheduledDate || task.completed) return false;
+            return isAfter(startOfDay(new Date(task.scheduledDate)), startOfDay(new Date()));
+        }
         return true;
     });
 

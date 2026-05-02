@@ -19,7 +19,7 @@ import {
     Bell
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useAuth } from '../context/AuthContext';
+import { useUser } from '@clerk/clerk-react';
 
 const DEFAULT_NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -32,19 +32,20 @@ const DEFAULT_NAV_ITEMS = [
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
-export default function Sidebar({ activeTab, setActiveTab }) {
-    const { currentUser } = useAuth();
+export default function Sidebar({ activeTab, setActiveTab, effectiveRole: roleFromBackend }) {
+    const { user: currentUser } = useUser();
     const [collapsed, setCollapsed] = useState(false);
     const [mobileOpen, setMobileOpen] = useState(false);
     const [isRearranging, setIsRearranging] = useState(false);
     const [unreadCount, setUnreadCount] = useState(0);
 
-    let effectiveRole = currentUser?.role || 'normal';
-    if (effectiveRole === 'normal') {
-        if (currentUser?.hasFullAccess) effectiveRole = 'full';
-        else if (currentUser?.hasPro) effectiveRole = 'pro';
+    const publicMetadata = currentUser?.publicMetadata || {};
+    let fromMetadata = publicMetadata.role || 'normal';
+    if (fromMetadata === 'normal') {
+        if (publicMetadata.hasFullAccess || publicMetadata.planType === 'full') fromMetadata = 'full';
+        else if (publicMetadata.hasPro || publicMetadata.planType === 'pro') fromMetadata = 'pro';
     }
-    const userRole = effectiveRole;
+    const userRole = roleFromBackend || fromMetadata;
 
     const roleToNav = {
         normal: ['dashboard', 'tasks', 'focus'],
@@ -56,26 +57,40 @@ export default function Sidebar({ activeTab, setActiveTab }) {
 
     const allowedIds = roleToNav[userRole] || roleToNav.normal;
 
-    // Fetch Notifications
+    // Fetch Notifications unread count (server is source of truth)
     useEffect(() => {
-        const fetchNotifications = async () => {
+        const fetchUnreadCount = async () => {
             try {
                 const token = localStorage.getItem('token');
-                if (!token) return;
-                const res = await fetch('/api/users/notifications', {
+                if (!token) {
+                    setUnreadCount(0);
+                    return;
+                }
+                const res = await fetch('/api/notifications?status=UNREAD', {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    setUnreadCount(data.filter(n => !n.isRead).length);
+                    setUnreadCount(Array.isArray(data) ? data.length : 0);
                 }
             } catch (err) {
                 console.error("Failed to fetch notifications", err);
             }
         };
-        fetchNotifications();
-        const intv = setInterval(fetchNotifications, 60000); // 1 minute polling
-        return () => clearInterval(intv);
+
+        const onNotificationsUpdated = (e) => {
+            const count = e?.detail?.unreadCount;
+            if (typeof count === 'number') setUnreadCount(count);
+            else fetchUnreadCount();
+        };
+
+        fetchUnreadCount();
+        window.addEventListener('notifications_updated', onNotificationsUpdated);
+        const intv = setInterval(fetchUnreadCount, 60000); // 1 minute polling
+        return () => {
+            window.removeEventListener('notifications_updated', onNotificationsUpdated);
+            clearInterval(intv);
+        };
     }, []);
 
     // Initialize items from localStorage or default

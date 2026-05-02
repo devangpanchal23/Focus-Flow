@@ -1,21 +1,44 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import { useUser, useAuth } from '@clerk/clerk-react';
 import { Lock, Crown, Zap, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
+async function waitForPlanActivation(getToken, requiredMode, maxAttempts = 24) {
+    const wantFull = requiredMode === 'FULL';
+    for (let i = 0; i < maxAttempts; i++) {
+        const token = await getToken();
+        if (!token) break;
+        const res = await fetch('/api/users/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) continue;
+        const { user } = await res.json();
+        const paid = user?.paymentStatus === 'completed';
+        const ok = wantFull
+            ? paid && user?.planType === 'full'
+            : paid && (user?.planType === 'pro' || user?.planType === 'full');
+        if (ok) {
+            window.dispatchEvent(new CustomEvent('payment_success', { detail: { user } }));
+            return true;
+        }
+        await new Promise((r) => setTimeout(r, 700));
+    }
+    return false;
+}
+
 export default function Payment({ feature, requiredMode = 'PRO' }) {
-    const { currentUser, setCurrentUser } = useAuth();
+    const { user: currentUser } = useUser();
+    const { getToken } = useAuth();
     const [loading, setLoading] = useState(false);
+    const [activating, setActivating] = useState(false);
     const [error, setError] = useState(null);
     const [success, setSuccess] = useState(false);
 
     const isFull = requiredMode === 'FULL';
-    const amount = isFull ? 700 : 300; // in INR
-    const themeColor = isFull ? "#9333ea" : "#6366f1"; // Purple for Full, Indigo for Pro
+    const amount = isFull ? 700 : 300;
+    const themeColor = isFull ? '#9333ea' : '#6366f1';
 
     const loadRazorpayScript = () => {
         return new Promise((resolve) => {
-            const script = document.createElement("script");
-            script.src = "https://checkout.razorpay.com/v1/checkout.js";
+            const script = document.createElement('script');
+            script.src = 'https://checkout.razorpay.com/v1/checkout.js';
             script.onload = () => resolve(true);
             script.onerror = () => resolve(false);
             document.body.appendChild(script);
@@ -34,14 +57,14 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
         }
 
         try {
-            const token = localStorage.getItem('token');
+            const token = await getToken();
             const orderRes = await fetch('/api/payment/create-order', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ mode: requiredMode })
+                body: JSON.stringify({ mode: requiredMode }),
             });
 
             if (!orderRes.ok) {
@@ -52,51 +75,67 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
             const order = await orderRes.json();
 
             const options = {
-                key: "rzp_test_SXABmDfkZVtgJ5",
+                key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_SXABmDfkZVtgJ5',
                 amount: order.amount,
-                currency: "INR",
-                name: "FocusFlow SaaS",
+                currency: 'INR',
+                name: 'FocusFlow SaaS',
                 description: `Unlock ${requiredMode} Mode: ${feature}`,
                 order_id: order.id,
                 theme: { color: themeColor },
                 handler: async function (response) {
+                    setActivating(true);
                     try {
                         const verifyRes = await fetch('/api/payment/verify', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
-                                'Authorization': `Bearer ${token}`
+                                Authorization: `Bearer ${token}`,
                             },
                             body: JSON.stringify({
                                 razorpay_order_id: response.razorpay_order_id,
                                 razorpay_payment_id: response.razorpay_payment_id,
                                 razorpay_signature: response.razorpay_signature,
                                 mode: requiredMode,
-                                amount: amount
-                            })
+                                amount,
+                                email: currentUser?.primaryEmailAddress?.emailAddress,
+                                displayName: currentUser?.fullName || currentUser?.firstName || 'Premium User',
+                            }),
                         });
 
                         const verifyData = await verifyRes.json();
 
-                        if (verifyRes.ok) {
-                            setSuccess(true);
-                            // Update currentUser context
-                            setCurrentUser(prev => ({
-                                ...prev,
-                                hasPro: true,
-                                ...(isFull ? { hasFullAccess: true } : {})
-                            }));
-                        } else {
+                        if (verifyRes.ok && verifyData.user) {
+                            window.dispatchEvent(
+                                new CustomEvent('payment_success', { detail: { user: verifyData.user } })
+                            );
+                        }
+
+                        if (!verifyRes.ok) {
                             setError(verifyData.error || 'Payment verification failed');
+                            setActivating(false);
+                            return;
+                        }
+
+                        await currentUser?.reload();
+
+                        const confirmed = await waitForPlanActivation(getToken, requiredMode);
+                        if (confirmed) {
+                            setSuccess(true);
+                        } else {
+                            setError(
+                                'Payment received. Your plan is still activating — please refresh the page shortly.'
+                            );
                         }
                     } catch (err) {
                         setError('Payment verification error: ' + err.message);
+                    } finally {
+                        setActivating(false);
                     }
                 },
                 prefill: {
-                    name: currentUser?.displayName || '',
-                    email: currentUser?.email || '',
-                }
+                    name: currentUser?.fullName || currentUser?.firstName || '',
+                    email: currentUser?.primaryEmailAddress?.emailAddress || '',
+                },
             };
 
             const rzp = new window.Razorpay(options);
@@ -104,7 +143,6 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
                 setError(response.error.description || 'Payment Failed');
             });
             rzp.open();
-
         } catch (err) {
             setError(err.message);
         } finally {
@@ -112,27 +150,44 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
         }
     };
 
+    if (activating) {
+        return (
+            <div className="flex flex-col items-center justify-center p-8 bg-slate-50 dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 rounded-2xl shadow-sm min-h-[500px]">
+                <svg className="animate-spin h-12 w-12 text-indigo-500 mb-6" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                </svg>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Activating your plan…</h2>
+                <p className="text-slate-600 dark:text-slate-400 text-center max-w-sm">
+                    We&apos;re confirming your payment with the server. This usually takes just a moment.
+                </p>
+            </div>
+        );
+    }
+
     if (success) {
         return (
             <div className="flex flex-col items-center justify-center p-8 bg-slate-50 dark:bg-slate-900 border border-green-200 dark:border-green-800 rounded-2xl shadow-sm min-h-[500px] animate-in fade-in duration-500">
                 <div className="w-20 h-20 bg-green-100 dark:bg-green-900/40 rounded-full flex items-center justify-center mb-6">
                     <CheckCircle2 size={40} className="text-green-500" />
                 </div>
-                <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Payment Successful!</h2>
+                <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">You&apos;re all set!</h2>
                 <p className="text-slate-600 dark:text-slate-400 mb-6 text-center max-w-sm">
-                    Welcome to {requiredMode} Mode! You now have permanent access to this premium feature.
+                    Your {requiredMode} plan is active. Premium features are unlocked from the server.
                 </p>
             </div>
         );
     }
 
     const gradientClass = isFull
-        ? "bg-gradient-to-br from-purple-500 to-pink-600"
-        : "bg-gradient-to-br from-indigo-500 to-purple-600";
+        ? 'bg-gradient-to-br from-purple-500 to-pink-600'
+        : 'bg-gradient-to-br from-indigo-500 to-purple-600';
 
-    const buttonClass = isFull
-        ? "bg-purple-600 hover:bg-purple-700"
-        : "bg-indigo-600 hover:bg-indigo-700";
+    const buttonClass = isFull ? 'bg-purple-600 hover:bg-purple-700' : 'bg-indigo-600 hover:bg-indigo-700';
 
     return (
         <div className="flex flex-col items-center justify-center p-4 md:p-8 h-full min-h-[600px] animate-in fade-in duration-500">
@@ -152,7 +207,9 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
 
                 <div className="p-8">
                     <div className="flex justify-center -mt-12 relative z-20 mb-6">
-                        <span className={`text-xs font-bold px-4 py-1.5 rounded-full shadow-md flex items-center gap-1 uppercase tracking-wider ${isFull ? 'bg-gradient-to-r from-amber-200 to-yellow-400 text-yellow-900' : 'bg-gradient-to-r from-blue-200 to-indigo-300 text-indigo-900'}`}>
+                        <span
+                            className={`text-xs font-bold px-4 py-1.5 rounded-full shadow-md flex items-center gap-1 uppercase tracking-wider ${isFull ? 'bg-gradient-to-r from-amber-200 to-yellow-400 text-yellow-900' : 'bg-gradient-to-r from-blue-200 to-indigo-300 text-indigo-900'}`}
+                        >
                             {isFull ? <Crown size={14} /> : <Zap size={14} />}
                             {requiredMode} Mode Required
                         </span>
@@ -167,7 +224,9 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
                                 </div>
                                 <div className="flex items-start gap-3">
                                     <CheckCircle2 className="text-purple-500 mt-0.5" size={20} />
-                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">Advanced Habit Tracker & Journal features.</p>
+                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">
+                                        Advanced Habit Tracker & Journal features.
+                                    </p>
                                 </div>
                                 <div className="flex items-start gap-3">
                                     <CheckCircle2 className="text-purple-500 mt-0.5" size={20} />
@@ -178,15 +237,21 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
                             <>
                                 <div className="flex items-start gap-3">
                                     <CheckCircle2 className="text-indigo-500 mt-0.5" size={20} />
-                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">Organize tasks efficiently with Calendar integration.</p>
+                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">
+                                        Organize tasks efficiently with Calendar integration.
+                                    </p>
                                 </div>
                                 <div className="flex items-start gap-3">
                                     <CheckCircle2 className="text-indigo-500 mt-0.5" size={20} />
-                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">Secure distractions with advanced Web Block.</p>
+                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">
+                                        Secure distractions with advanced Web Block.
+                                    </p>
                                 </div>
                                 <div className="flex items-start gap-3">
                                     <CheckCircle2 className="text-indigo-500 mt-0.5" size={20} />
-                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">Permanent unlock for your entire account.</p>
+                                    <p className="text-slate-700 dark:text-slate-300 font-medium text-sm">
+                                        Permanent unlock for your entire account.
+                                    </p>
                                 </div>
                             </>
                         )}
@@ -208,6 +273,7 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
                     )}
 
                     <button
+                        type="button"
                         onClick={handlePayment}
                         disabled={loading}
                         className={`w-full relative group overflow-hidden ${buttonClass} text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-70 disabled:active:scale-100`}
@@ -224,8 +290,8 @@ export default function Payment({ feature, requiredMode = 'PRO' }) {
                                 </span>
                             ) : (
                                 <>
-                                    <Zap size={20} className={isFull ? "text-purple-200" : "text-indigo-200"} />
-                                    <span>{isFull ? "Unlock Full Access" : "Upgrade to Pro"}</span>
+                                    <Zap size={20} className={isFull ? 'text-purple-200' : 'text-indigo-200'} />
+                                    <span>{isFull ? 'Unlock Full Access' : 'Upgrade to Pro'}</span>
                                 </>
                             )}
                         </div>

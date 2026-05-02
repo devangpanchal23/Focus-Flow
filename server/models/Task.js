@@ -27,7 +27,7 @@ const TaskSchema = new mongoose.Schema({
     },
     createdAt: {
         type: Date,
-        default: Date.now,
+        default: Date.now, // record creation time only — never use for “which day is this task on”
     },
     timeSpent: {
         type: Number,
@@ -43,6 +43,7 @@ const TaskSchema = new mongoose.Schema({
     },
     scheduledDate: {
         type: Date,
+        // User-selected calendar day for the task (authoritative for lists & calendar)
     },
     scheduledTime: {
         type: String,

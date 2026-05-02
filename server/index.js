@@ -1,7 +1,10 @@
+import 'dotenv/config';
 import express from 'express';
+
+
+
 import mongoose from 'mongoose';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -20,14 +23,22 @@ import notesRoutes from './routes/notes.js';
 import authRoutes from './routes/auth.js';
 import upgradeRoutes from './routes/upgrade.js';
 import paymentRoutes from './routes/payment.js';
+import notificationRoutes from './routes/notifications.js';
+import { handleRazorpayWebhook } from './controllers/webhookController.js';
 
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5001;
+// Trigger restart
 
 // Middleware
 app.use(cors());
+// Razorpay webhook signature verification requires the raw body (must be before express.json)
+app.post(
+    '/api/payment/webhook',
+    express.raw({ type: '*/*', limit: '512kb' }),
+    handleRazorpayWebhook
+);
 app.use(express.json());
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -55,11 +66,21 @@ app.use('/api/web-block', webBlockRoutes);
 app.use('/api/notion', notionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/focus-score', focusScoreRoutes);
+app.use('/api/notifications', notificationRoutes);
+
+// Error Handling Middleware for Clerk
+app.use((err, req, res, next) => {
+    if (err.message === 'Unauthenticated') {
+        return res.status(401).json({ message: 'Unauthorized: Invalid or expired token' });
+    }
+    console.error('SERVER ERROR:', err.stack);
+    res.status(500).json({ message: 'Internal Server Error' });
+});
 
 // --- Serve production frontend ---
 if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.join(__dirname, '../dist')));
-    app.get('*', (req, res) => {
+    app.get('(.*)', (req, res) => {
         res.sendFile(path.join(__dirname, '../dist/index.html'));
     });
 } else {

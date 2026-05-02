@@ -2,11 +2,13 @@ import express from 'express';
 import { calculateAndSaveFocusScore } from '../utils/scoreCalculator.js';
 import UserFocusScore from '../models/UserFocusScore.js';
 import { verifyToken } from '../middleware/auth.js';
+import { checkFeatureAccess } from '../middleware/featureAccessMiddleware.js';
 import { format, subDays } from 'date-fns';
 
 const router = express.Router();
 
 router.use(verifyToken);
+router.use(checkFeatureAccess('analytics'));
 
 // Get Score for a specific date (defaults to today)
 // This triggers a fresh calculation to ensure real-time accuracy

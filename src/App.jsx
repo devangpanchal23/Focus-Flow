@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { SignedIn, SignedOut, SignIn, SignUp, useUser, useAuth } from '@clerk/clerk-react';
+
 import Sidebar from './layout/Sidebar';
 import { useSettingsStore } from './store/useSettingsStore';
 import { useTaskStore } from './store/useTaskStore';
@@ -10,7 +13,6 @@ import Dashboard from './components/dashboard/Dashboard';
 import Tasks from './components/tasks/Tasks';
 import Focus from './components/timer/Focus';
 import WebBlock from './components/web-block/WebBlock';
-// Replaced Notion Calendar with native Calendar component
 import Calendar from './components/calendar/BlitzCalendar.jsx';
 import HabitTracker from './components/habit-tracker/HabitTracker';
 import Journal from './components/journal/Journal';
@@ -19,20 +21,20 @@ import Settings from './components/settings/Settings';
 import Notifications from './components/notifications/Notifications';
 
 import GlobalTimer from './components/GlobalTimer';
-
-import AuthPage from './components/auth/AuthPage';
-import { useAuth } from './context/AuthContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import PremiumFeatureWrapper from './components/common/PremiumFeatureWrapper.jsx';
+import { getEffectiveRole } from './utils/accessControl';
 
-function App() {
-  const { currentUser } = useAuth();
-  // Initialize activeTab from localStorage or default to 'dashboard'
+function MainApp() {
+  const { user: currentUser } = useUser();
+  const { getToken } = useAuth();
+
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('blitzit_active_tab') || 'dashboard';
   });
+  
+  const [backendUser, setBackendUser] = useState(null);
 
-  // Persist activeTab changes
   useEffect(() => {
     localStorage.setItem('blitzit_active_tab', activeTab);
   }, [activeTab]);
@@ -44,45 +46,54 @@ function App() {
   const { fetchHistory: fetchJournalHistory, setAuthToken: setJournalAuthToken } = useJournalStore();
 
   useEffect(() => {
-    if (currentUser) {
-      const token = localStorage.getItem('token');
-      if (token) {
-        // Init Task Store
-        setTaskAuthToken(token);
-        fetchTasks();
+    const initData = async () => {
+      if (currentUser) {
+        try {
+          const token = await getToken();
+          if (token) {
+            localStorage.setItem('token', token); // For backward compatibility
+            
+            // Fetch backend user as the ultimate source of truth for features and roles
+            try {
+              const res = await fetch('/api/users/me', {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (res.ok) {
+                const data = await res.json();
+                setBackendUser(data.user ?? null);
+              }
+            } catch (err) {
+              console.error('Failed to sync backend user', err);
+            }
 
-        // Init Habit Store
-        setHabitAuthToken(token);
-        fetchHabits();
+            setTaskAuthToken(token);
+            useTaskStore.getState().setGetToken(getToken);
+            fetchTasks();
 
-        // Init Note Store
-        setNoteAuthToken(token);
-        fetchNotes();
+            setHabitAuthToken(token);
+            fetchHabits();
 
-        // Init Journal Store
-        setJournalAuthToken(token);
-        fetchJournalHistory();
+            setNoteAuthToken(token);
+            fetchNotes();
+
+            setJournalAuthToken(token);
+            fetchJournalHistory();
+          }
+        } catch (error) {
+          console.error("Error fetching Clerk token", error);
+        }
+      } else {
+        useTaskStore.setState({ tasks: [], activeTaskId: null, error: null, authToken: null });
+        useHabitStore.setState({ habits: [], completions: {}, error: null, authToken: null });
+        useNoteStore.setState({ notes: [], error: null, authToken: null });
+        useJournalStore.setState({ entries: [], error: null, authToken: null });
       }
-    } else {
-      // Reset stores on logout
-      useTaskStore.setState({ tasks: [], activeTaskId: null, error: null, authToken: null });
-      useHabitStore.setState({ habits: [], completions: {}, error: null, authToken: null });
-      useNoteStore.setState({ notes: [], error: null, authToken: null });
-      useJournalStore.setState({ entries: [], error: null, authToken: null });
-    }
-  }, [currentUser, fetchTasks, setTaskAuthToken, fetchHabits, setHabitAuthToken, fetchNotes, setNoteAuthToken, fetchJournalHistory, setJournalAuthToken]);
-
-  if (!currentUser) {
-    return <AuthPage />;
-  }
+    };
+    initData();
+  }, [currentUser, getToken, fetchTasks, setTaskAuthToken, fetchHabits, setHabitAuthToken, fetchNotes, setNoteAuthToken, fetchJournalHistory, setJournalAuthToken]);
 
   // Derive effective role based on privileges
-  let effectiveRole = currentUser?.role || 'normal';
-  if (effectiveRole === 'normal') {
-    if (currentUser?.hasFullAccess) effectiveRole = 'full';
-    else if (currentUser?.hasPro) effectiveRole = 'pro';
-  }
-  const userRole = effectiveRole;
+  const userRole = getEffectiveRole(backendUser, currentUser);
 
   const roleToTabs = {
     normal: ['dashboard', 'tasks', 'focus', 'calendar', 'notifications', 'settings'],
@@ -111,13 +122,31 @@ function App() {
   useEffect(() => {
     const handleSettings = () => setActiveTab('settings');
     const handleDashboard = () => setActiveTab('dashboard');
+    const handlePaymentSuccess = (event) => {
+      const optimistic = event?.detail?.user;
+      if (optimistic) setBackendUser((prev) => ({ ...prev, ...optimistic }));
+      if (currentUser) {
+        getToken().then((token) => {
+          if (token) {
+            fetch('/api/users/me', { headers: { Authorization: `Bearer ${token}` } })
+              .then((res) => res.json())
+              .then((data) => {
+                if (data.user) setBackendUser(data.user);
+              })
+              .catch(console.error);
+          }
+        });
+      }
+    };
     window.addEventListener('navigate_settings', handleSettings);
     window.addEventListener('navigate_dashboard', handleDashboard);
+    window.addEventListener('payment_success', handlePaymentSuccess);
     return () => {
       window.removeEventListener('navigate_settings', handleSettings);
       window.removeEventListener('navigate_dashboard', handleDashboard);
+      window.removeEventListener('payment_success', handlePaymentSuccess);
     };
-  }, []);
+  }, [currentUser, getToken]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -125,32 +154,32 @@ function App() {
       case 'tasks': return <Tasks />;
       case 'habit-tracker':
         return (
-          <PremiumFeatureWrapper feature="Habit Tracker" requiredRole="full">
+          <PremiumFeatureWrapper feature="Habit Tracker" requiredRole="full" currentRole={userRole}>
             <HabitTracker />
           </PremiumFeatureWrapper>
         );
       case 'journal':
         return (
-          <PremiumFeatureWrapper feature="Journal" requiredRole="full">
+          <PremiumFeatureWrapper feature="Journal" requiredRole="full" currentRole={userRole}>
             <Journal />
           </PremiumFeatureWrapper>
         );
       case 'focus': return <Focus />;
       case 'web-block':
         return (
-          <PremiumFeatureWrapper feature="Web Block" requiredRole="pro">
+          <PremiumFeatureWrapper feature="Web Block" requiredRole="pro" currentRole={userRole}>
             <WebBlock />
           </PremiumFeatureWrapper>
         );
       case 'calendar':
         return (
-          <PremiumFeatureWrapper feature="Calendar" requiredRole="pro">
+          <PremiumFeatureWrapper feature="Calendar" requiredRole="pro" currentRole={userRole}>
             <Calendar />
           </PremiumFeatureWrapper>
         );
       case 'analytics':
         return (
-          <PremiumFeatureWrapper feature="Analytics" requiredRole="full">
+          <PremiumFeatureWrapper feature="Analytics" requiredRole="full" currentRole={userRole}>
             <Analytics />
           </PremiumFeatureWrapper>
         );
@@ -161,9 +190,9 @@ function App() {
   };
 
   return (
-    <div key={currentUser?.uid} className="flex h-screen bg-slate-50 transition-colors duration-300 dark:bg-slate-900">
+    <div key={currentUser?.id} className="flex h-screen bg-slate-50 transition-colors duration-300 dark:bg-slate-900">
       <GlobalTimer />
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} effectiveRole={userRole} />
 
       <main className="flex-1 overflow-y-auto h-full w-full pt-16 lg:pt-0">
         <div className="h-full">
@@ -173,6 +202,59 @@ function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+import ProtectedRoute from './components/auth/ProtectedRoute';
+
+function App() {
+  return (
+    <Routes>
+      {/* Public Home Page or redirect to dashboard if logged in */}
+      <Route
+        path="/"
+        element={
+          <>
+            <SignedIn>
+              <Navigate to="/dashboard" replace />
+            </SignedIn>
+            <SignedOut>
+              <Navigate to="/sign-in" replace />
+            </SignedOut>
+          </>
+        }
+      />
+      <Route
+        path="/sign-in/*"
+        element={
+          <div className="flex h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-900">
+            <SignIn routing="path" path="/sign-in" signUpUrl="/sign-up" forceRedirectUrl="/dashboard" />
+          </div>
+        }
+      />
+      <Route
+        path="/sign-up/*"
+        element={
+          <div className="flex h-screen w-full items-center justify-center bg-slate-50 dark:bg-slate-900">
+            <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" forceRedirectUrl="/dashboard" />
+          </div>
+        }
+      />
+      {/* Protected Dashboard Route */}
+      <Route
+        path="/dashboard/*"
+        element={
+          <ProtectedRoute>
+            <MainApp />
+          </ProtectedRoute>
+        }
+      />
+      {/* Fallback route */}
+      <Route
+        path="*"
+        element={<Navigate to="/dashboard" replace />}
+      />
+    </Routes>
   );
 }
 

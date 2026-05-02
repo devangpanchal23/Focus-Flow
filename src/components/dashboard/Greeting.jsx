@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Sun, Moon, CloudSun } from 'lucide-react';
 import { format } from 'date-fns';
-import { useAuth } from '../../context/AuthContext';
+import { useUser } from '@clerk/clerk-react';
 
 export default function Greeting() {
-    const { currentUser } = useAuth();
+    const { user: currentUser } = useUser();
     const [date, setDate] = useState(new Date());
 
     useEffect(() => {
@@ -31,7 +31,7 @@ export default function Greeting() {
             </div>
             <div className="flex items-center gap-3">
                 <h1 className="text-3xl md:text-4xl font-bold text-slate-800 tracking-tight">
-                    {greeting}, {currentUser?.displayName?.split(' ')[0] || 'User'}
+                    {greeting}, {currentUser?.firstName || currentUser?.fullName?.split(' ')[0] || 'User'}
                 </h1>
                 <Icon className="text-indigo-500 w-8 h-8 md:w-10 md:h-10" strokeWidth={1.5} />
             </div>

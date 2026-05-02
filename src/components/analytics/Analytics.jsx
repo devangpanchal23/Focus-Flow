@@ -56,25 +56,21 @@ export default function Analytics() {
                     // 3. Aggregate Task Counts using IS_SAME_DAY for exact local-time precision
                     // This creates 1:1 parity with the Task List view
                     allTasks.forEach(task => {
-                        if (!task.createdAt) return;
-                        const taskCreatedDate = parseISO(task.createdAt);
+                        if (!task.scheduledDate) return;
+                        const taskScheduledDate =
+                            typeof task.scheduledDate === 'string'
+                                ? parseISO(task.scheduledDate)
+                                : new Date(task.scheduledDate);
 
-                        // Find the bucket that matches this task's creation day
-                        // We use find() with isSameDay to handle Timezones correctly matching the UI
-                        const creationBucket = dailyBuckets.find(b => isSameDay(b.dateObj, taskCreatedDate));
+                        const creationBucket = dailyBuckets.find(b =>
+                            isSameDay(b.dateObj, taskScheduledDate));
                         if (creationBucket) {
                             creationBucket.tasksCreated += 1;
                         }
 
-                        // Handle Completion
                         if (task.completed) {
-                            // User Request Fix: "make that perfect and actual with reflact each time that display in task"
-                            // The user expects that if a task belongs to "Yesterday" (createdAt/scheduledDate) and they complete it,
-                            // it should show as completed "Yesterday" in the chart, not Today.
-                            // We prioritize specific day matching over the execution timestamp.
-                            const dateToUse = taskCreatedDate;
-
-                            const completionBucket = dailyBuckets.find(b => isSameDay(b.dateObj, dateToUse));
+                            const completionBucket = dailyBuckets.find(b =>
+                                isSameDay(b.dateObj, taskScheduledDate));
                             if (completionBucket) {
                                 completionBucket.tasksCompleted += 1;
                             }

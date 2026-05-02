@@ -6,7 +6,7 @@ import { checkFeatureAccess } from '../middleware/featureAccessMiddleware.js';
 const router = express.Router();
 
 router.use(verifyToken);
-router.use(checkFeatureAccess('calendar')); // Journal acts under the 'calendar' or 'pro' feature flag
+router.use(checkFeatureAccess('journal'));
 
 // Get all entries for user
 router.get('/', async (req, res) => {

@@ -3,12 +3,23 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import User from '../models/User.js';
+import AuthProvider from '../models/AuthProvider.js';
+import LoginLogbook from '../models/LoginLogbook.js';
+import { verifyToken } from '../middleware/auth.js';
+import { toPublicUser } from '../utils/userPublic.js';
 
 const router = express.Router();
 
-// Helper to generate JWT
-const generateToken = (userId) => {
-    return jwt.sign({ user_id: userId }, process.env.JWT_SECRET || 'fallback_secret_key', {
+const generateToken = (user) => {
+    const uid = typeof user === 'string' ? user : user.userId;
+    const payload = {
+        user_id: uid,
+        planType: typeof user === 'string' ? 'free' : user.planType || 'free',
+    };
+    if (typeof user !== 'string' && user.planExpiry) {
+        payload.planExpiry = user.planExpiry.getTime ? user.planExpiry.getTime() : user.planExpiry;
+    }
+    return jwt.sign(payload, process.env.JWT_SECRET || 'fallback_secret_key', {
         expiresIn: '7d',
     });
 };
@@ -46,13 +57,22 @@ router.post('/signup', async (req, res) => {
         const newUser = new User({
             userId,
             email: normalizedEmail,
-            password: hashedPassword,
             displayName: name || normalizedEmail.split('@')[0],
             role: isAdmin ? 'admin' : 'normal',
             status: isAdmin ? 'accepted' : 'pending'
         });
 
         await newUser.save();
+
+        // Create AuthProvider for local auth
+        const authProvider = new AuthProvider({
+            userId: newUser._id,
+            provider: 'local',
+            providerId: normalizedEmail,
+            credentials: hashedPassword
+        });
+
+        await authProvider.save();
 
         res.status(201).json({
             message: 'Account created successfully. Please wait for admin approval.',
@@ -91,18 +111,24 @@ router.post('/login', async (req, res) => {
         // Check if user exists
         const user = await User.findOne({ email: normalizedEmail });
         if (!user) {
+            await LoginLogbook.create({ provider: 'local', ipAddress: req.ip, userAgent: req.headers['user-agent'], status: 'Failed_No_User' });
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
-        // Verify password
-        if (!user.password) {
+        // Verify password from AuthProvider
+        const authProvider = await AuthProvider.findOne({ userId: user._id, provider: 'local' });
+        if (!authProvider || !authProvider.credentials) {
+            await LoginLogbook.create({ userId: user._id, provider: 'local', ipAddress: req.ip, userAgent: req.headers['user-agent'], status: 'Failed_Invalid_Creds' });
             return res.status(401).json({ message: 'Invalid credentials. User might have been registered via another method without a password.' });
         }
 
-        const isMatch = await bcrypt.compare(password, user.password);
+        const isMatch = await bcrypt.compare(password, authProvider.credentials);
         if (!isMatch) {
+            await LoginLogbook.create({ userId: user._id, provider: 'local', ipAddress: req.ip, userAgent: req.headers['user-agent'], status: 'Failed_Invalid_Creds' });
             return res.status(401).json({ message: 'Invalid credentials' });
         }
+
+        await LoginLogbook.create({ userId: user._id, provider: 'local', ipAddress: req.ip, userAgent: req.headers['user-agent'], status: 'Success' });
 
         const isAdminEmail = normalizedEmail === 'admin@focusflow.com';
 
@@ -121,23 +147,12 @@ router.post('/login', async (req, res) => {
             return res.status(403).json({ message: "Account rejected by admin" });
         }
 
-        // Generate token
-        const token = generateToken(user.userId);
+        const token = generateToken(user);
 
         res.json({
             message: 'Login successful',
             token,
-            user: {
-                uid: user.userId,
-                email: user.email,
-                displayName: user.displayName,
-                photoURL: user.photoURL,
-                role: user.role,
-                status: user.status,
-                isPremium: user.isPremium,
-                hasPro: user.hasPro,
-                hasFullAccess: user.hasFullAccess
-            }
+            user: toPublicUser(user),
         });
 
     } catch (error) {
@@ -147,36 +162,15 @@ router.post('/login', async (req, res) => {
 });
 
 // Verify / Get Current User
-router.get('/me', async (req, res) => {
+router.get('/me', verifyToken, async (req, res) => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({ message: 'Unauthorized: No token provided' });
-        }
-
-        const token = authHeader.split(' ')[1];
-
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_key');
-
-        const user = await User.findOne({ userId: decoded.user_id }).select('-password');
+        const user = await User.findOne({ userId: req.user.uid }).select('-password');
 
         if (!user) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        res.json({
-            user: {
-                uid: user.userId,
-                email: user.email,
-                displayName: user.displayName,
-                photoURL: user.photoURL,
-                role: user.role,
-                status: user.status,
-                isPremium: user.isPremium,
-                hasPro: user.hasPro,
-                hasFullAccess: user.hasFullAccess
-            }
-        });
+        res.json({ user: toPublicUser(user) });
     } catch (error) {
         console.error('Token verification error:', error);
         res.status(401).json({ message: 'Invalid token' });
@@ -201,8 +195,19 @@ router.post('/reset-password', async (req, res) => {
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-        user.password = hashedPassword;
-        await user.save();
+        const authProvider = await AuthProvider.findOne({ userId: user._id, provider: 'local' });
+        if (authProvider) {
+            authProvider.credentials = hashedPassword;
+            await authProvider.save();
+        } else {
+            // If they didn't have a local provider, create one
+            await AuthProvider.create({
+                userId: user._id,
+                provider: 'local',
+                providerId: normalizedEmail,
+                credentials: hashedPassword
+            });
+        }
 
         res.status(200).json({ message: 'Password reset successful. You can now login.' });
     } catch (error) {

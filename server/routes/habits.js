@@ -1,11 +1,12 @@
 import express from 'express';
 import Habit from '../models/Habit.js';
 import { verifyToken } from '../middleware/auth.js';
+import { checkFeatureAccess } from '../middleware/featureAccessMiddleware.js';
 
 const router = express.Router();
 
-// Apply auth middleware
 router.use(verifyToken);
+router.use(checkFeatureAccess('habits'));
 
 // Get all habits
 router.get('/', async (req, res) => {

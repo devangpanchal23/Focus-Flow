@@ -1,34 +1,32 @@
 import mongoose from 'mongoose';
 
 const NotificationSchema = new mongoose.Schema({
-    title: {
-        type: String,
-        required: true,
-        trim: true
+    userId: { 
+        type: String, // String to support both Local UUID and Clerk sub ID
+        required: true 
     },
-    message: {
-        type: String,
-        required: true
+    type: { 
+        type: String, 
+        enum: ['PROMO', 'ACHIEVEMENT', 'PURCHASE', 'SYSTEM'], 
+        required: true 
     },
-    recipientType: {
-        type: String,
-        enum: ['ALL', 'USER'],
-        default: 'USER'
+    title: { type: String, required: true },
+    message: { type: String, required: true },
+    status: { 
+        type: String, 
+        enum: ['UNREAD', 'READ', 'DISMISSED', 'DELETED'], 
+        default: 'UNREAD' 
     },
-    userId: {
-        type: String, // Only required if recipientType is 'USER'
+    action: {
+        type: { type: String, enum: ['VIEW_RECEIPT', 'CLAIM_REWARD', 'NAVIGATE', 'NONE'], default: 'NONE' },
+        linkId: { type: String }, // e.g., Purchase _id or Reward _id
+        url: { type: String }     // Fallback external link
     },
-    read: {
-        type: Boolean,
-        default: false
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
-    }
+    expiresAt: { type: Date }, // Automatically clean up old promos
+    createdAt: { type: Date, default: Date.now }
 });
 
-// Index for efficient querying by user or broadcast
-NotificationSchema.index({ recipientType: 1, userId: 1, createdAt: -1 });
+// Compound index for rapid fetching of a user's active notification panel
+NotificationSchema.index({ userId: 1, status: 1, createdAt: -1 });
 
 export default mongoose.model('Notification', NotificationSchema);

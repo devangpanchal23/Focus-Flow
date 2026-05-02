@@ -1,6 +1,7 @@
 import express from 'express';
 import User from '../models/User.js';
 import { verifyToken } from '../middleware/auth.js';
+import { toPublicUser } from '../utils/userPublic.js';
 
 import { getUserNotifications } from '../controllers/notificationController.js';
 
@@ -31,12 +32,12 @@ router.post('/sync', async (req, res) => {
     }
 });
 
-// Get current user profile
+// Get current user profile (canonical shape for Clerk + SPA)
 router.get('/me', async (req, res) => {
     try {
         const user = await User.findOne({ userId: req.user.uid });
         if (!user) return res.status(404).json({ message: 'User not found' });
-        res.json(user);
+        res.json({ user: toPublicUser(user) });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
