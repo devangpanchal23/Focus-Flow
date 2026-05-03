@@ -1,3 +1,11 @@
+process.on("uncaughtException", err => {
+  console.error("UNCAUGHT ERROR:", err);
+});
+
+process.on("unhandledRejection", err => {
+  console.error("UNHANDLED PROMISE:", err);
+});
+
 import 'dotenv/config';
 import express from 'express';
 
