@@ -1,6 +1,21 @@
 version: '3.9'
 
 services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_URL: /api
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - appnet
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -10,43 +25,26 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
-    ports:
-      - '5000:5000'
-    restart: unless-stopped
-    networks:
-      - appnet
-
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-      args:
-        VITE_API_URL: ${VITE_API_URL}
-        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
-    env_file:
-      - .env
+      MONGODB_URI: mongodb://mongo:27017/focusflow
     depends_on:
-      - backend
+      - mongo
     ports:
-      - '80:80'
-    restart: unless-stopped
+      - "5000:5000"   
     networks:
       - appnet
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:6
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - appnet
+    restart: unless-stopped
 
 networks:
   appnet:
     driver: bridge
-  backend-core:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - NODE_ENV=production
-      - PORT=5001
-      - MONGODB_URI=${MONGODB_URI}
-      - JWT_SECRET=${JWT_SECRET}
-      - VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY}
-    networks:
-      - backend_internal
-    restart: unless-stopped
-    # Note: No ports exposed to host. Traffic must go through api-gateway.
+
+volumes:
+  mongo-data:
