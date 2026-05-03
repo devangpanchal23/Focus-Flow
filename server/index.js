@@ -117,19 +117,10 @@ app.use((err, req, res, next) => {
 // ===============================
 // Frontend Serving (Production)
 // ===============================
-if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '../dist');
 
-  app.use(express.static(distPath));
-
-  app.get('/', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-} else {
   app.get('/', (req, res) => {
     res.send('FocusFlow API running. Frontend should run separately.');
   });
-}
 
 // ===============================
 // Start Server
