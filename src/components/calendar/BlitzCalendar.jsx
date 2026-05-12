@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, X, Clock, Check, Trash2 } from 'lucide-react';
-import { format, startOfMonth, endOfMonth, isSameDay, subDays, addDays } from 'date-fns';
+import { format, startOfMonth, endOfMonth, subDays, addDays } from 'date-fns';
 import { useTaskStore } from '../../store/useTaskStore';
+import { useAuth } from '@clerk/clerk-react';
+import { apiUrl } from '../../lib/api';
 
 export default function Calendar() {
     const { addTask, updateTask, deleteTask, selectedDate, setSelectedDate } = useTaskStore();
+    const { getToken, isLoaded } = useAuth();
     const [currentDate, setCurrentDate] = useState(() => {
         const sd = useTaskStore.getState().selectedDate;
         return new Date(sd.getFullYear(), sd.getMonth(), 1);
@@ -13,6 +16,7 @@ export default function Calendar() {
     const [calendarTasks, setCalendarTasks] = useState([]);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [selectedTimeSlot, setSelectedTimeSlot] = useState(null);
+    const [calendarError, setCalendarError] = useState(null);
     const [newTask, setNewTask] = useState({
         title: '',
         description: '',
@@ -22,21 +26,26 @@ export default function Calendar() {
     });
 
     const loadMonthTasks = useCallback(async () => {
-        const tokenFn = useTaskStore.getState().getToken;
-        const token = tokenFn ? await tokenFn() : useTaskStore.getState().authToken;
+        if (!isLoaded) return;
+        const token = await getToken();
         if (!token) return;
         const rs = format(startOfMonth(currentDate), 'yyyy-MM-dd');
         const re = format(endOfMonth(currentDate), 'yyyy-MM-dd');
         try {
             const res = await fetch(
-                `/api/tasks?rangeStart=${encodeURIComponent(rs)}&rangeEnd=${encodeURIComponent(re)}`,
+                `${apiUrl('/api/tasks')}?rangeStart=${encodeURIComponent(rs)}&rangeEnd=${encodeURIComponent(re)}`,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
-            if (res.ok) setCalendarTasks(await res.json());
+            if (!res.ok) {
+                throw new Error('Failed to load calendar tasks');
+            }
+            setCalendarTasks(await res.json());
+            setCalendarError(null);
         } catch (e) {
             console.error('Calendar task load failed', e);
+            setCalendarError(e.message || 'Failed to load calendar tasks');
         }
-    }, [currentDate]);
+    }, [currentDate, getToken, isLoaded]);
 
     useEffect(() => {
         loadMonthTasks();
@@ -144,17 +153,30 @@ export default function Calendar() {
         setCurrentDate(new Date(currentDate.getFullYear() + 1, currentDate.getMonth()));
     };
 
+    const toDayKey = (value) => {
+        if (!value) return '';
+        if (typeof value === 'string') {
+            if (value.length >= 10) return value.slice(0, 10);
+            return '';
+        }
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toISOString().slice(0, 10);
+    };
+
     const getTasksForDate = (date) => {
+        const key = format(date, 'yyyy-MM-dd');
         return calendarTasks.filter((task) => {
             if (!task.scheduledDate) return false;
-            return isSameDay(new Date(task.scheduledDate), date);
+            return toDayKey(task.scheduledDate) === key;
         });
     };
 
     const getTasksForTimeSlot = (date, hour, minute) => {
+        const key = format(date, 'yyyy-MM-dd');
         return calendarTasks.filter((task) => {
             if (!task.scheduledDate || !task.scheduledTime) return false;
-            if (!isSameDay(new Date(task.scheduledDate), date)) return false;
+            if (toDayKey(task.scheduledDate) !== key) return false;
             const [taskHour, taskMinute] = task.scheduledTime.split(':').map(Number);
             return taskHour === hour && taskMinute === minute;
         });
@@ -260,6 +282,11 @@ export default function Calendar() {
 
             {/* Calendar Container */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                {calendarError && (
+                    <div className="px-4 py-3 text-sm text-red-600 bg-red-50 border-b border-red-100 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/30">
+                        {calendarError}
+                    </div>
+                )}
                 {/* Navigation */}
                 <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-4 md:p-6 border-b border-slate-200 dark:border-slate-700">
                     <div className="flex items-center justify-between">

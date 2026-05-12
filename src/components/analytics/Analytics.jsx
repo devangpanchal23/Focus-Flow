@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import FocusChart from './FocusChart';
 import ProjectPieChart from './ProjectPieChart';
 import TaskCompletionChart from './TaskCompletionChart';
@@ -8,27 +8,39 @@ import WeeklyProductivityChart from './WeeklyProductivityChart';
 import { TrendingUp, Award } from 'lucide-react';
 import { useTaskStore } from '../../store/useTaskStore';
 import { format, subDays, parseISO, isSameDay, startOfDay } from 'date-fns';
+import { useAuth } from '@clerk/clerk-react';
+import { apiUrl } from '../../lib/api';
 
 export default function Analytics() {
     const [stats, setStats] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const { tasks, authToken } = useTaskStore(); // We still trigger re-fetch on task changes
+    const { tasks } = useTaskStore(); // We still trigger re-fetch on task changes
+    const { getToken, isLoaded } = useAuth();
 
     useEffect(() => {
         const fetchData = async () => {
-            if (!authToken) return;
+            setIsLoading(true);
+            if (!isLoaded) return;
+            const authToken = await getToken();
+            if (!authToken) {
+                setStats([]);
+                setIsLoading(false);
+                return;
+            }
 
             try {
                 // Fetch both stats (for focus time) and all tasks (for accurate counts)
                 const headers = { 'Authorization': `Bearer ${authToken}` };
                 const [statsRes, tasksRes] = await Promise.all([
-                    fetch('/api/stats/history', { headers }),
-                    fetch('/api/tasks', { headers }) // Fetching all tasks to ensure accurate historical completion/creation counts
+                    fetch(`${apiUrl('/api/stats/history')}?days=365`, { headers }),
+                    fetch(apiUrl('/api/tasks'), { headers }) // Fetching all tasks to ensure accurate historical completion/creation counts
                 ]);
 
-                if (statsRes.ok && tasksRes.ok) {
-                    const serverStats = await statsRes.json();
-                    const allTasks = await tasksRes.json();
+                if (!statsRes.ok || !tasksRes.ok) {
+                    throw new Error('Failed to load analytics data');
+                }
+                const serverStats = await statsRes.json();
+                const allTasks = await tasksRes.json();
 
                     // 1. Generate normalized daily buckets for the last 30+ days
                     const today = startOfDay(new Date()); // Normalize to midnight local time
@@ -85,17 +97,17 @@ export default function Analytics() {
                         totalFocusTime: b.totalFocusTime
                     }));
 
-                    setStats(mergedStats);
-                }
+                setStats(mergedStats);
             } catch (error) {
                 console.error('Failed to fetch analytics data:', error);
+                setStats([]);
             } finally {
                 setIsLoading(false);
             }
         };
 
         fetchData();
-    }, [tasks]); // Re-compute whenever tasks change in the store
+    }, [tasks, getToken, isLoaded]); // Re-compute whenever tasks change in the store
 
     return (
         <div className="p-6 max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">

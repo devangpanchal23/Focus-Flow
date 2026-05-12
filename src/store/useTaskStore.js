@@ -10,7 +10,7 @@ async function safeJson(response) {
     try {
         return JSON.parse(text);
     } catch {
-        return null;
+        throw new Error('Server returned invalid JSON');
     }
 }
 
@@ -55,7 +55,7 @@ export const useTaskStore = create((set, get) => ({
                 throw new Error(err?.message || 'Failed to fetch tasks');
             }
             const data = await safeJson(response);
-            set({ tasks: data, isLoading: false });
+            set({ tasks: Array.isArray(data) ? data : [], isLoading: false });
         } catch (err) {
             set({ error: err.message, isLoading: false });
         }

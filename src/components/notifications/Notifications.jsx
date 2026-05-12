@@ -1,33 +1,59 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Bell, CheckCircle2 } from 'lucide-react';
+import { useAuth } from '@clerk/clerk-react';
+import { apiUrl } from '../../lib/api';
+
+async function safeJson(response) {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
 
 export default function Notifications() {
     const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const { getToken, isLoaded } = useAuth();
+
+    const fetchNotifications = async () => {
+        try {
+            if (!isLoaded) return;
+            const token = await getToken();
+            if (!token) {
+                setNotifications([]);
+                return;
+            }
+            const res = await fetch(apiUrl('/api/notifications'), {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                const err = await safeJson(res);
+                throw new Error(err?.message || 'Failed to load notifications');
+            }
+            const data = await safeJson(res);
+            setNotifications(Array.isArray(data) ? data : []);
+            setError(null);
+        } catch (err) {
+            console.error("Failed to fetch notifications", err);
+            setError(err.message || 'Failed to load notifications.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     useEffect(() => {
-        const fetchNotifications = async () => {
-            try {
-                const token = localStorage.getItem('token');
-                if (!token) return;
-                const res = await fetch('/api/notifications', {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    setNotifications(await res.json());
-                    setError(null);
-                }
-            } catch (err) {
-                console.error("Failed to fetch notifications", err);
-                setError('Failed to load notifications.');
-            } finally {
-                setLoading(false);
-            }
-        };
-
         fetchNotifications();
-    }, []);
+    }, [getToken, isLoaded]);
+
+    useEffect(() => {
+        const onPaymentSuccess = () => fetchNotifications();
+        window.addEventListener('payment_success', onPaymentSuccess);
+        return () => window.removeEventListener('payment_success', onPaymentSuccess);
+    }, [getToken, isLoaded]);
 
     const unreadCount = useMemo(
         () => notifications.filter((n) => n.status === 'UNREAD').length,
@@ -40,12 +66,15 @@ export default function Notifications() {
 
     const refresh = async () => {
         try {
-            const token = localStorage.getItem('token');
+            const token = await getToken();
             if (!token) return;
-            const res = await fetch('/api/notifications', {
+            const res = await fetch(apiUrl('/api/notifications'), {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            if (res.ok) setNotifications(await res.json());
+            if (res.ok) {
+                const data = await safeJson(res);
+                setNotifications(Array.isArray(data) ? data : []);
+            }
         } catch (e) {
             console.error(e);
         }
@@ -53,13 +82,13 @@ export default function Notifications() {
 
     const markAsRead = async (id) => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`/api/notifications/${id}/read`, {
+            const token = await getToken();
+            const res = await fetch(apiUrl(`/api/notifications/${id}/read`), {
                 method: 'PATCH',
                 headers: { Authorization: `Bearer ${token}` }
             });
             if (res.ok) {
-                const updated = await res.json();
+                const updated = await safeJson(res);
                 setNotifications((prev) => prev.map((n) => (n._id === id ? updated : n)));
             }
         } catch (err) {
@@ -69,8 +98,8 @@ export default function Notifications() {
 
     const markAllAsRead = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch('/api/notifications/read-all', {
+            const token = await getToken();
+            const res = await fetch(apiUrl('/api/notifications/read-all'), {
                 method: 'PATCH',
                 headers: { Authorization: `Bearer ${token}` }
             });

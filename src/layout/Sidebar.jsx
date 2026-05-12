@@ -22,6 +22,10 @@ import { cn } from '../lib/utils';
 import { useAuth, useUser } from '@clerk/clerk-react';
 import { createDebounced, patchUserState } from '../utils/userStateSync';
 import { readUiSnapshot } from '../utils/readUiSnapshot';
+import { apiUrl } from '../lib/api';
+
+// Temporarily disabled from home screen navigation for future enhancement.
+const WEB_BLOCK_ENABLED = false;
 
 const DEFAULT_NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -29,7 +33,7 @@ const DEFAULT_NAV_ITEMS = [
     { id: 'habit-tracker', label: 'Habit Tracker', icon: Activity },
     { id: 'journal', label: 'Journal', icon: BookOpen },
     { id: 'focus', label: 'Focus Mode', icon: Timer },
-    { id: 'web-block', label: 'Web Block', icon: Shield },
+    ...(WEB_BLOCK_ENABLED ? [{ id: 'web-block', label: 'Web Block', icon: Shield }] : []),
     { id: 'calendar', label: 'Calendar', icon: Calendar },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
 ];
@@ -69,7 +73,7 @@ export default function Sidebar({ activeTab, setActiveTab, effectiveRole: roleFr
 
     const roleToNav = {
         normal: ['dashboard', 'tasks', 'focus'],
-        pro: ['dashboard', 'tasks', 'focus', 'calendar', 'web-block'],
+        pro: ['dashboard', 'tasks', 'focus', 'calendar', ...(WEB_BLOCK_ENABLED ? ['web-block'] : [])],
         full: DEFAULT_NAV_ITEMS.map(i => i.id),
         admin: DEFAULT_NAV_ITEMS.map(i => i.id),
         moderator: DEFAULT_NAV_ITEMS.map(i => i.id)
@@ -81,12 +85,12 @@ export default function Sidebar({ activeTab, setActiveTab, effectiveRole: roleFr
     useEffect(() => {
         const fetchUnreadCount = async () => {
             try {
-                const token = localStorage.getItem('token');
+                const token = await getToken();
                 if (!token) {
                     setUnreadCount(0);
                     return;
                 }
-                const res = await fetch('/api/notifications?status=UNREAD', {
+                const res = await fetch(apiUrl('/api/notifications?status=UNREAD'), {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (res.ok) {
@@ -111,7 +115,7 @@ export default function Sidebar({ activeTab, setActiveTab, effectiveRole: roleFr
             window.removeEventListener('notifications_updated', onNotificationsUpdated);
             clearInterval(intv);
         };
-    }, []);
+    }, [getToken]);
 
     // Initialize items from Mongo snapshot → localStorage → default
     const [navItems, setNavItems] = useState(() => {

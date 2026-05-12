@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Trash2, Globe, AlertCircle, Loader2, Download } from 'lucide-react';
-import { useTaskStore } from '../../store/useTaskStore';
+import { useAuth } from '@clerk/clerk-react';
+import { apiUrl } from '../../lib/api';
+
+async function safeJson(response) {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
 
 export default function WebBlock() {
-    const { authToken } = useTaskStore();
+    const { getToken, isLoaded } = useAuth();
     const [blockedSites, setBlockedSites] = useState([]);
     const [url, setUrl] = useState('');
     const [loading, setLoading] = useState(true);
@@ -11,10 +22,8 @@ export default function WebBlock() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        if (authToken) {
-            fetchBlockedSites();
-        }
-    }, [authToken]);
+        if (isLoaded) fetchBlockedSites();
+    }, [isLoaded]);
 
     // Sync helper
     const syncToExtension = (sites) => {
@@ -28,11 +37,14 @@ export default function WebBlock() {
 
     const fetchBlockedSites = async () => {
         try {
-            const res = await fetch('/api/web-block', {
-                headers: { 'Authorization': `Bearer ${authToken}` }
+            const token = await getToken();
+            if (!token) return;
+            const res = await fetch(apiUrl('/api/web-block'), {
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) throw new Error('Failed to fetch blocked websites');
-            const data = await res.json();
+            const data = await safeJson(res);
+            if (!Array.isArray(data)) throw new Error('Invalid blocked websites response');
             setBlockedSites(data);
             syncToExtension(data);
         } catch (err) {
@@ -48,19 +60,24 @@ export default function WebBlock() {
         setIsSubmitting(true);
         setError(null);
         try {
-            const res = await fetch('/api/web-block', {
+            const token = await getToken();
+            if (!token) throw new Error('Authentication failed');
+            const res = await fetch(apiUrl('/api/web-block'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${authToken}`
+                    'Authorization': `Bearer ${token}`
                 },
                 body: JSON.stringify({ domain: url })
             });
 
-            const data = await res.json();
+            const data = await safeJson(res);
 
             if (!res.ok) {
-                throw new Error(data.message || 'Failed to block website');
+                throw new Error(data?.message || 'Failed to block website');
+            }
+            if (!data?._id || !data?.domain) {
+                throw new Error('Invalid block website response');
             }
 
             const newSites = [data, ...blockedSites];
@@ -76,9 +93,11 @@ export default function WebBlock() {
 
     const handleRemove = async (id) => {
         try {
-            const res = await fetch(`/api/web-block/${id}`, {
+            const token = await getToken();
+            if (!token) throw new Error('Authentication failed');
+            const res = await fetch(apiUrl(`/api/web-block/${id}`), {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${authToken}` }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) throw new Error('Failed to remove');
 
@@ -107,19 +126,25 @@ export default function WebBlock() {
             ];
 
             // Fetch and add each file to the ZIP
-            await Promise.all(
-                files.map(async (file) => {
+            for (const file of files) {
+                const response = await fetch(`/web-block-extension/${file}`);
+                if (!response.ok) {
+                    throw new Error(`Extension file missing: ${file}`);
+                }
+                const content = await response.text();
+                if (file === 'manifest.json') {
+                    let parsedManifest;
                     try {
-                        const response = await fetch(`/web-block-extension/${file}`);
-                        if (response.ok) {
-                            const content = await response.text();
-                            zip.file(file, content);
-                        }
-                    } catch (err) {
-                        console.error(`Failed to fetch ${file}:`, err);
+                        parsedManifest = JSON.parse(content);
+                    } catch {
+                        throw new Error('Extension manifest is not valid JSON');
                     }
-                })
-            );
+                    if (parsedManifest?.manifest_version !== 3) {
+                        throw new Error('Extension manifest version is invalid');
+                    }
+                }
+                zip.file(file, content);
+            }
 
             // Add a README file with installation instructions
             const readme = `BlitzIt Web Block Extension
@@ -166,7 +191,7 @@ Enjoy distraction-free browsing!
             document.body.removeChild(a);
         } catch (err) {
             console.error('Download error:', err);
-            setError('Failed to download extension. Please try again.');
+            setError(err.message || 'Failed to download extension. Please try again.');
         }
     };
 

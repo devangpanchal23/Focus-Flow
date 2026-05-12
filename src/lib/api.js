@@ -5,8 +5,16 @@ const API_BASE_URL = RAW_API_URL.endsWith('/')
     : RAW_API_URL;
 
 export function apiUrl(path) {
-    if (!path) return API_BASE_URL;
+    if (!path) return API_BASE_URL || '';
     const safePath = path.startsWith('/') ? path : `/${path}`;
-    return API_BASE_URL ? `${API_BASE_URL}${safePath}` : safePath;
+
+    if (!API_BASE_URL) return safePath;
+
+    // Avoid accidental /api/api/... when base already ends with /api.
+    if (API_BASE_URL.endsWith('/api') && safePath.startsWith('/api/')) {
+        return `${API_BASE_URL}${safePath.slice(4)}`;
+    }
+
+    return `${API_BASE_URL}${safePath}`;
 }
 

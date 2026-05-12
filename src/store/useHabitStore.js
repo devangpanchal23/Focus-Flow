@@ -1,6 +1,17 @@
 import { create } from 'zustand';
+import { apiUrl } from '../lib/api';
 
-const API_URL = '/api/habits';
+const API_URL = apiUrl('/api/habits');
+
+async function safeJson(response) {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
 
 export const useHabitStore = create((set, get) => ({
     habits: [],
@@ -8,13 +19,16 @@ export const useHabitStore = create((set, get) => ({
     isLoading: false,
     error: null,
     authToken: null,
+    getToken: null,
 
     // Auth Token management
     setAuthToken: (token) => set({ authToken: token }),
+    setGetToken: (fn) => set({ getToken: fn }),
 
     // Fetch Habits from Backend
     fetchHabits: async () => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         if (!token) return;
 
         set({ isLoading: true });
@@ -22,9 +36,15 @@ export const useHabitStore = create((set, get) => ({
             const response = await fetch(API_URL, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (!response.ok) throw new Error('Failed to fetch habits');
+            if (!response.ok) {
+                const err = await safeJson(response);
+                throw new Error(err?.message || 'Failed to fetch habits');
+            }
 
-            const data = await response.json();
+            const data = await safeJson(response);
+            if (!Array.isArray(data)) {
+                throw new Error('Invalid habits response');
+            }
 
             // Map backend data to store format
             // Backend returns: [{ id, title, createdAt, completions: [] }]
@@ -41,7 +61,7 @@ export const useHabitStore = create((set, get) => ({
                 completions[h.id] = h.completions || [];
             });
 
-            set({ habits, completions, isLoading: false });
+            set({ habits, completions, error: null, isLoading: false });
         } catch (err) {
             console.error('Fetch habits error:', err);
             set({ error: err.message, isLoading: false });
@@ -49,8 +69,9 @@ export const useHabitStore = create((set, get) => ({
     },
 
     addHabit: async (title) => {
-        const token = get().authToken;
-        if (!token) return;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
+        if (!token) throw new Error('Authentication token missing');
 
         // Optimistic update? Maybe risky without ID. Let's wait for server.
         try {
@@ -63,22 +84,30 @@ export const useHabitStore = create((set, get) => ({
                 body: JSON.stringify({ title })
             });
 
-            if (!response.ok) throw new Error('Failed to create habit');
-            const newHabit = await response.json();
+            if (!response.ok) {
+                const err = await safeJson(response);
+                throw new Error(err?.message || 'Failed to create habit');
+            }
+            const newHabit = await safeJson(response);
+            if (!newHabit?.id) throw new Error('Invalid habit response');
 
             // Store update
             set((state) => ({
                 habits: [...state.habits, { id: newHabit.id, title: newHabit.title, createdAt: newHabit.createdAt }],
                 completions: { ...state.completions, [newHabit.id]: [] }
             }));
+            set({ error: null });
 
         } catch (err) {
             console.error('Add habit error:', err);
+            set({ error: err.message });
+            throw err;
         }
     },
 
     removeHabit: async (id) => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
 
         // Optimistic update
         const prevHabits = get().habits;
@@ -92,19 +121,26 @@ export const useHabitStore = create((set, get) => ({
         });
 
         try {
-            await fetch(`${API_URL}/${id}`, {
+            const response = await fetch(`${API_URL}/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
+            if (!response.ok) {
+                const err = await safeJson(response);
+                throw new Error(err?.message || 'Failed to delete habit');
+            }
         } catch (err) {
             console.error('Delete habit error:', err);
             // Revert
             set({ habits: prevHabits, completions: prevCompletions });
+            set({ error: err.message });
+            throw err;
         }
     },
 
     toggleHabit: async (habitId, dateStr) => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
 
         // Optimistic update
         const prevCompletions = get().completions;
@@ -137,15 +173,21 @@ export const useHabitStore = create((set, get) => ({
                 body: JSON.stringify({ date: dateStr })
             });
 
-            if (!response.ok) throw new Error('Failed to toggle');
+            if (!response.ok) {
+                const err = await safeJson(response);
+                throw new Error(err?.message || 'Failed to toggle habit');
+            }
 
             // Optional: Sync with server response if needed, 
             // but optimistic should be fine for simple toggles.
+            set({ error: null });
 
         } catch (err) {
             console.error('Toggle habit error:', err);
             // Revert
             set({ completions: prevCompletions });
+            set({ error: err.message });
+            throw err;
         }
     },
 

@@ -29,18 +29,21 @@ import { useSyncSettingsToMongo } from './hooks/useSyncSettingsToMongo';
 import { writeUiSnapshot, clearUiSnapshot } from './utils/readUiSnapshot';
 import { apiUrl } from './lib/api';
 
+// Temporarily disabled from home screen navigation for future enhancement.
+const WEB_BLOCK_ENABLED = false;
+
 /** Tabs that exist in routing / sidebar ids (premium gating clamps via userRole separately). */
 const KNOWN_APP_TAB_IDS = new Set([
   'dashboard',
   'tasks',
   'focus',
   'calendar',
-  'web-block',
   'habit-tracker',
   'journal',
   'analytics',
   'notifications',
   'settings',
+  ...(WEB_BLOCK_ENABLED ? ['web-block'] : []),
 ]);
 
 function MainApp() {
@@ -72,9 +75,9 @@ function MainApp() {
 
   const theme = useSettingsStore((state) => state.theme);
   const { fetchTasks, setAuthToken: setTaskAuthToken } = useTaskStore();
-  const { fetchHabits, setAuthToken: setHabitAuthToken } = useHabitStore();
-  const { fetchNotes, setAuthToken: setNoteAuthToken } = useNoteStore();
-  const { fetchHistory: fetchJournalHistory, setAuthToken: setJournalAuthToken } = useJournalStore();
+  const { fetchHabits, setAuthToken: setHabitAuthToken, setGetToken: setHabitGetToken } = useHabitStore();
+  const { fetchNotes, setAuthToken: setNoteAuthToken, setGetToken: setNoteGetToken } = useNoteStore();
+  const { fetchHistory: fetchJournalHistory, setAuthToken: setJournalAuthToken, setGetToken: setJournalGetToken } = useJournalStore();
 
   const fetchBackendProfile = async (token, attempts = 3) => {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -171,12 +174,15 @@ function MainApp() {
             fetchTasks();
 
             setHabitAuthToken(token);
+            setHabitGetToken(getToken);
             fetchHabits();
 
             setNoteAuthToken(token);
+            setNoteGetToken(getToken);
             fetchNotes();
 
             setJournalAuthToken(token);
+            setJournalGetToken(getToken);
             fetchJournalHistory();
           }
         } catch (error) {
@@ -186,14 +192,14 @@ function MainApp() {
         setBackendUser(null);
         clearUiSnapshot();
         useTaskStore.setState({ tasks: [], activeTaskId: null, error: null, authToken: null });
-        useHabitStore.setState({ habits: [], completions: {}, error: null, authToken: null });
-        useNoteStore.setState({ notes: [], error: null, authToken: null });
-        useJournalStore.setState({ entries: [], error: null, authToken: null });
+        useHabitStore.setState({ habits: [], completions: {}, error: null, authToken: null, getToken: null });
+        useNoteStore.setState({ notes: [], error: null, authToken: null, getToken: null });
+        useJournalStore.setState({ entries: [], error: null, authToken: null, getToken: null });
       } 
       setIsHydratingUser(false);
     };
     initData();
-  }, [currentUser, getToken, fetchTasks, setTaskAuthToken, fetchHabits, setHabitAuthToken, fetchNotes, setNoteAuthToken, fetchJournalHistory, setJournalAuthToken, markPreferencesHydrated]);
+  }, [currentUser, getToken, fetchTasks, setTaskAuthToken, fetchHabits, setHabitAuthToken, setHabitGetToken, fetchNotes, setNoteAuthToken, setNoteGetToken, fetchJournalHistory, setJournalAuthToken, setJournalGetToken, markPreferencesHydrated]);
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -218,10 +224,10 @@ function MainApp() {
 
   const roleToTabs = {
     normal: ['dashboard', 'tasks', 'focus', 'calendar', 'notifications', 'settings'],
-    pro: ['dashboard', 'tasks', 'focus', 'calendar', 'web-block', 'notifications', 'settings'],
-    full: ['dashboard', 'tasks', 'focus', 'calendar', 'web-block', 'habit-tracker', 'journal', 'analytics', 'notifications', 'settings'],
-    admin: ['dashboard', 'tasks', 'focus', 'calendar', 'web-block', 'habit-tracker', 'journal', 'analytics', 'notifications', 'settings'],
-    moderator: ['dashboard', 'tasks', 'focus', 'calendar', 'web-block', 'habit-tracker', 'journal', 'analytics', 'notifications', 'settings']
+    pro: ['dashboard', 'tasks', 'focus', 'calendar', ...(WEB_BLOCK_ENABLED ? ['web-block'] : []), 'notifications', 'settings'],
+    full: ['dashboard', 'tasks', 'focus', 'calendar', ...(WEB_BLOCK_ENABLED ? ['web-block'] : []), 'habit-tracker', 'journal', 'analytics', 'notifications', 'settings'],
+    admin: ['dashboard', 'tasks', 'focus', 'calendar', ...(WEB_BLOCK_ENABLED ? ['web-block'] : []), 'habit-tracker', 'journal', 'analytics', 'notifications', 'settings'],
+    moderator: ['dashboard', 'tasks', 'focus', 'calendar', ...(WEB_BLOCK_ENABLED ? ['web-block'] : []), 'habit-tracker', 'journal', 'analytics', 'notifications', 'settings']
   };
 
   const allowedTabs = roleToTabs[userRole] || roleToTabs.normal;
@@ -298,11 +304,11 @@ function MainApp() {
         );
       case 'focus': return <Focus />;
       case 'web-block':
-        return (
+        return WEB_BLOCK_ENABLED ? (
           <PremiumFeatureWrapper feature="Web Block" requiredRole="pro" currentRole={userRole}>
             <WebBlock />
           </PremiumFeatureWrapper>
-        );
+        ) : <Dashboard />;
       case 'calendar':
         return (
           <PremiumFeatureWrapper feature="Calendar" requiredRole="pro" currentRole={userRole}>

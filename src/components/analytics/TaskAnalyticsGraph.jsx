@@ -9,7 +9,7 @@ import {
     ResponsiveContainer,
     Legend
 } from 'recharts';
-import { format, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, addMonths, subMonths, isSameDay } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, addMonths, subMonths } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function TaskAnalyticsGraph({ stats = [], isLoading = false }) {
@@ -97,7 +97,7 @@ export default function TaskAnalyticsGraph({ stats = [], isLoading = false }) {
                             strokeWidth={3}
                             dot={{ r: 3, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
                             activeDot={{ r: 6 }}
-                            animatioDuration={500}
+                            animationDuration={500}
                         />
                         <Line
                             type="monotone"

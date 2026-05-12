@@ -10,11 +10,24 @@ router.use(verifyToken);
 // Get history (last 30 days)
 router.get('/history', async (req, res) => {
     try {
-        // Fetch all stats and sort by date ascending
-        // In a real app, you might limit this to the last 30 days using a date query
-        const stats = await DailyStats.find({ userId: req.user.uid }).sort({ date: 1 }).limit(30);
+        const requestedDays = Number.parseInt(req.query.days, 10);
+        const days = Number.isFinite(requestedDays)
+            ? Math.max(1, Math.min(requestedDays, 365))
+            : 30;
+
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - (days - 1));
+        const cutoffDate = cutoff.toISOString().slice(0, 10);
+
+        const stats = await DailyStats.find({
+            userId: req.user.uid,
+            date: { $gte: cutoffDate },
+        })
+            .sort({ date: 1 })
+            .limit(days + 5);
         res.json(stats);
     } catch (err) {
+        console.error('[stats] history failed', { userId: req.user?.uid, error: err.message });
         res.status(500).json({ message: err.message });
     }
 });

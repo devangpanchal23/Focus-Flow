@@ -1,19 +1,33 @@
 import { create } from 'zustand';
+import { apiUrl } from '../lib/api';
 
 // API Configuration
-const API_URL = '/api/journal';
+const API_URL = apiUrl('/api/journal');
+
+async function safeJson(response) {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
+}
 
 export const useJournalStore = create((set, get) => ({
     entries: [],
     isLoading: false,
     error: null,
     authToken: null,
+    getToken: null,
 
     setAuthToken: (token) => set({ authToken: token }),
+    setGetToken: (fn) => set({ getToken: fn }),
 
     // Fetch all journal history headers (date + snippet)
     fetchHistory: async () => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         if (!token) return; // Silent return if no token
 
         try {
@@ -21,18 +35,22 @@ export const useJournalStore = create((set, get) => ({
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
-                const data = await res.json();
+                const data = await safeJson(res);
                 set({ entries: data });
+            } else {
+                const err = await safeJson(res);
+                set({ error: err?.message || 'Failed to load journal history' });
             }
         } catch (error) {
             console.error("Failed to fetch journal history:", error);
-            // Don't set error state globally here to avoid UI clutter, just log it
+            set({ error: error.message || 'Failed to load journal history' });
         }
     },
 
     // Save a journal entry
     saveEntry: async (date, content) => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         if (!token) throw new Error('You must be logged in to save.');
 
         set({ isLoading: true });
@@ -47,13 +65,13 @@ export const useJournalStore = create((set, get) => ({
             });
 
             if (!res.ok) {
-                const errData = await res.json();
-                throw new Error(errData.message || 'Failed to save');
+                const errData = await safeJson(res);
+                throw new Error(errData?.message || 'Failed to save');
             }
 
             // Refresh history to ensure snippets are up to date
             get().fetchHistory();
-            set({ isLoading: false });
+            set({ isLoading: false, error: null });
             return true;
         } catch (error) {
             set({ isLoading: false, error: error.message });
@@ -63,7 +81,8 @@ export const useJournalStore = create((set, get) => ({
 
     // Fetch a single entry content
     fetchEntryContent: async (date) => {
-        const token = get().authToken;
+        const tokenFn = get().getToken;
+        const token = tokenFn ? await tokenFn() : get().authToken;
         if (!token) return '';
 
         set({ isLoading: true });
@@ -74,7 +93,7 @@ export const useJournalStore = create((set, get) => ({
 
             set({ isLoading: false });
             if (res.ok) {
-                const data = await res.json();
+                const data = await safeJson(res);
                 return data.content || '';
             }
             return '';

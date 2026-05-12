@@ -45,6 +45,9 @@ router.post('/', async (req, res) => {
         console.log(`[Journal] Saving entry for user ${req.user.uid} on date ${date}`);
 
         if (!date) return res.status(400).json({ message: 'Date is required' });
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ message: 'Invalid date format. Use YYYY-MM-DD' });
+        }
 
         // upsert: true creates the document if it doesn't exist
         // new: true returns the modified document rather than the original
@@ -52,7 +55,7 @@ router.post('/', async (req, res) => {
         const entry = await JournalEntry.findOneAndUpdate(
             { userId: req.user.uid, date },
             {
-                content,
+                content: typeof content === 'string' ? content : '',
                 updatedAt: new Date(),
                 $setOnInsert: { createdAt: new Date() }
             },

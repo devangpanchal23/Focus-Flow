@@ -29,13 +29,14 @@ router.get('/', async (req, res) => {
 // Create a habit
 router.post('/', async (req, res) => {
     try {
-        if (!req.body.title) {
+        const title = typeof req.body.title === 'string' ? req.body.title.trim() : '';
+        if (!title) {
             return res.status(400).json({ message: 'Title is required' });
         }
 
         const habit = new Habit({
             userId: req.user.uid,
-            title: req.body.title,
+            title,
             createdAt: new Date()
         });
 
@@ -48,6 +49,7 @@ router.post('/', async (req, res) => {
             completions: newHabit.completions
         });
     } catch (err) {
+        console.error('[habits] create failed', { userId: req.user?.uid, error: err.message });
         res.status(400).json({ message: err.message });
     }
 });

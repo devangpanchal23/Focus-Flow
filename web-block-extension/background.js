@@ -1,39 +1,71 @@
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'UPDATE_BLOCK_LIST') {
-        updateBlockingRules(message.sites);
-    }
-});
+function normalizeDomain(input) {
+    if (!input || typeof input !== 'string') return '';
+    let value = input.trim().toLowerCase();
+    value = value.replace(/^https?:\/\//, '');
+    value = value.replace(/^www\./, '');
+    value = value.split('/')[0];
+    value = value.split('?')[0];
+    value = value.split('#')[0];
+    return value;
+}
 
-async function updateBlockingRules(sites) {
-    if (!sites || !Array.isArray(sites)) return;
+async function applyRulesForDomains(rawDomains) {
+    const domains = Array.from(
+        new Set((rawDomains || []).map(normalizeDomain).filter(Boolean))
+    );
 
-    const domains = sites.map(s => s.domain).filter(Boolean);
-    console.log('Updating blocking rules for:', domains);
-
-    // Get existing rules to clean up
     const oldRules = await chrome.declarativeNetRequest.getDynamicRules();
-    const oldRuleIds = oldRules.map(rule => rule.id);
+    const removeRuleIds = oldRules.map((rule) => rule.id);
 
-    // Create new rules
-    const newRules = domains.map((domain, index) => ({
+    const addRules = domains.map((domain, index) => ({
         id: index + 1,
         priority: 1,
         action: {
-            type: "redirect",
-            redirect: { extensionPath: "/blocked.html" }
+            type: 'redirect',
+            redirect: { extensionPath: '/blocked.html' },
         },
         condition: {
-            urlFilter: "||" + domain,
-            resourceTypes: ["main_frame"]
-        }
+            // ||domain blocks root + subdomains on both http/https
+            urlFilter: `||${domain}`,
+            resourceTypes: ['main_frame'],
+        },
     }));
 
-    // Perform update
     await chrome.declarativeNetRequest.updateDynamicRules({
-        removeRuleIds: oldRuleIds,
-        addRules: newRules
+        removeRuleIds,
+        addRules,
     });
 
-    // Save to storage for persistence locally in extension (optional but good)
-    chrome.storage.local.set({ blockedDomains: domains });
+    await chrome.storage.local.set({ blockedDomains: domains });
 }
+
+async function applyRulesFromStorage() {
+    const { blockedDomains = [] } = await chrome.storage.local.get(['blockedDomains']);
+    await applyRulesForDomains(blockedDomains);
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+    applyRulesFromStorage().catch((err) => {
+        console.error('Failed to apply rules on install:', err);
+    });
+});
+
+chrome.runtime.onStartup.addListener(() => {
+    applyRulesFromStorage().catch((err) => {
+        console.error('Failed to apply rules on startup:', err);
+    });
+});
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type !== 'UPDATE_BLOCK_LIST') return;
+    const domains = Array.isArray(message.sites)
+        ? message.sites.map((site) => site?.domain)
+        : [];
+    applyRulesForDomains(domains)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => {
+            console.error('Failed to update rules from message:', err);
+            sendResponse({ ok: false, error: String(err?.message || err) });
+        });
+    return true;
+});
