@@ -1,76 +1,152 @@
-// 🔒 Catch unexpected errors (keep at top)
-process.on("uncaughtException", err => {
-  console.error("UNCAUGHT ERROR:", err);
+// ===============================
+// 🔒 Global Error Handling
+// ===============================
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
 });
 
-process.on("unhandledRejection", err => {
-  console.error("UNHANDLED PROMISE:", err);
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION:", err);
 });
 
-// Load env variables
-import 'dotenv/config';
+// ===============================
+// Environment Variables
+// ===============================
+import "dotenv/config";
 
-import express from 'express';
-import mongoose from 'mongoose';
-import cors from 'cors';
-import path from 'path';
-import { fileURLToPath } from 'url';
+// ===============================
+// Imports
+// ===============================
+import express from "express";
+import mongoose from "mongoose";
+import cors from "cors";
 
-// Fix __dirname for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
+// ===============================
 // Routes
-import taskRoutes from './routes/tasks.js';
-import statsRoutes from './routes/stats.js';
-import userRoutes from './routes/users.js';
-import webBlockRoutes from './routes/webBlock.js';
-import notionRoutes from './routes/notion.js';
-import habitRoutes from './routes/habits.js';
-import adminRoutes from './routes/admin.js';
-import focusScoreRoutes from './routes/focusScore.js';
-import journalRoutes from './routes/journal.js';
-import notesRoutes from './routes/notes.js';
-import authRoutes from './routes/auth.js';
-import upgradeRoutes from './routes/upgrade.js';
-import paymentRoutes from './routes/payment.js';
-import notificationRoutes from './routes/notifications.js';
+// ===============================
+import taskRoutes from "./routes/tasks.js";
+import statsRoutes from "./routes/stats.js";
+import userRoutes from "./routes/users.js";
+import webBlockRoutes from "./routes/webBlock.js";
+import notionRoutes from "./routes/notion.js";
+import habitRoutes from "./routes/habits.js";
+import adminRoutes from "./routes/admin.js";
+import focusScoreRoutes from "./routes/focusScore.js";
+import journalRoutes from "./routes/journal.js";
+import notesRoutes from "./routes/notes.js";
+import authRoutes from "./routes/auth.js";
+import upgradeRoutes from "./routes/upgrade.js";
+import paymentRoutes from "./routes/payment.js";
+import notificationRoutes from "./routes/notifications.js";
 
-// Webhook
-import { handleRazorpayWebhook } from './controllers/webhookController.js';
+// ===============================
+// Controllers
+// ===============================
+import { handleRazorpayWebhook } from "./controllers/webhookController.js";
 
+// ===============================
+// App Config
+// ===============================
 const app = express();
-const PORT = process.env.PORT || 5000;
+
+const PORT = process.env.PORT || 5001;
+
+// ===============================
+// CORS
+// ===============================
+app.use(
+  cors({
+    origin: "*",
+    credentials: true,
+  })
+);
+
+// ===============================
+// Razorpay Webhook
+// Must come BEFORE express.json()
+// ===============================
+app.post(
+  "/api/payment/webhook",
+  express.raw({ type: "*/*", limit: "512kb" }),
+  handleRazorpayWebhook
+);
 
 // ===============================
 // Middleware
 // ===============================
-app.use(cors());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 
-// Razorpay webhook (must come before json parser)
-app.post(
-  '/api/payment/webhook',
-  express.raw({ type: '*/*', limit: '512kb' }),
-  handleRazorpayWebhook
-);
-
-app.use(express.json());
-
-// Request logger (optional but helpful)
+// ===============================
+// Request Logger
+// ===============================
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log(
+    `[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`
+  );
   next();
 });
 
 // ===============================
-// Database Connection (SAFE)
+// Health Check Route
+// ===============================
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "FocusFlow Backend API Running 🚀",
+  });
+});
+
+// ===============================
+// API Routes
+// ===============================
+app.use("/api/auth", authRoutes);
+app.use("/api/upgrade", upgradeRoutes);
+app.use("/api/journal", journalRoutes);
+app.use("/api/notes", notesRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/stats", statsRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/payment", paymentRoutes);
+app.use("/api/habits", habitRoutes);
+app.use("/api/web-block", webBlockRoutes);
+app.use("/api/notion", notionRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/focus-score", focusScoreRoutes);
+app.use("/api/notifications", notificationRoutes);
+
+// ===============================
+// 404 Route
+// ===============================
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API Route Not Found",
+  });
+});
+
+// ===============================
+// Error Handling Middleware
+// ===============================
+app.use((err, req, res, next) => {
+  console.error("SERVER ERROR:", err);
+
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || "Internal Server Error",
+  });
+});
+
+// ===============================
+// Database Connection
 // ===============================
 if (!process.env.MONGODB_URI) {
-  console.error("❌ MONGODB_URI is missing in environment variables");
+  console.error("❌ MONGODB_URI missing in environment variables");
   process.exit(1);
 }
 
-  mongoose.connect(process.env.MONGODB_URI)
+mongoose
+  .connect(process.env.MONGODB_URI)
   .then(() => {
     console.log("✅ MongoDB Connected");
 
@@ -78,53 +154,7 @@ if (!process.env.MONGODB_URI) {
       console.log(`🚀 Server running on port ${PORT}`);
     });
   })
-  .catch(err => {
-    console.error("❌ MongoDB Connection Error:", err);
+  .catch((err) => {
+    console.error("❌ MongoDB Connection Failed:", err);
     process.exit(1);
   });
-
-// ===============================
-// Routes
-// ===============================
-console.log('Registering routes...');
-
-app.use('/api/auth', authRoutes);
-app.use('/api/upgrade', upgradeRoutes);
-app.use('/api/journal', journalRoutes);
-app.use('/api/notes', notesRoutes);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/stats', statsRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/payment', paymentRoutes);
-app.use('/api/habits', habitRoutes);
-app.use('/api/web-block', webBlockRoutes);
-app.use('/api/notion', notionRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/focus-score', focusScoreRoutes);
-app.use('/api/notifications', notificationRoutes);
-
-// ===============================
-// Error Handling Middleware
-// ===============================
-app.use((err, req, res, next) => {
-  if (err.message === 'Unauthenticated') {
-    return res.status(401).json({ message: 'Unauthorized: Invalid or expired token' });
-  }
-  console.error('SERVER ERROR:', err.stack);
-  res.status(500).json({ message: 'Internal Server Error' });
-});
-
-// ===============================
-// Frontend Serving (Production)
-// ===============================
-
-  app.get('/', (req, res) => {
-    res.send('FocusFlow API running. Frontend should run separately.');
-  });
-
-// ===============================
-// Start Server
-// ===============================
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
