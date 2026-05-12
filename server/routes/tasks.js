@@ -30,6 +30,38 @@ const buildDailyStatsUpdate = (incUpdate, identityUpdate) => {
     return update;
 };
 
+const LOG_PREFIX = '[tasks]';
+
+const sanitizeTaskPayload = (body = {}) => {
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    const description =
+        typeof body.description === 'string' ? body.description.trim() : '';
+    const project =
+        typeof body.project === 'string' && body.project.trim()
+            ? body.project.trim()
+            : 'Inbox';
+    const priority =
+        ['high', 'medium', 'low', 'p4'].includes(body.priority)
+            ? body.priority
+            : 'medium';
+    const estimatedTimeRaw = Number(body.estimatedTime);
+    const estimatedTime = Number.isFinite(estimatedTimeRaw)
+        ? Math.max(0, Math.floor(estimatedTimeRaw))
+        : 0;
+    const scheduledTime =
+        typeof body.scheduledTime === 'string' ? body.scheduledTime : undefined;
+
+    return {
+        title,
+        description,
+        project,
+        priority,
+        estimatedTime,
+        scheduledDate: body.scheduledDate,
+        scheduledTime,
+    };
+};
+
 // Apply auth middleware to all routes
 router.use(verifyToken);
 
@@ -111,23 +143,29 @@ router.get('/', async (req, res) => {
 // Create a task
 router.post('/', async (req, res) => {
     try {
-        console.log('Creating task with body:', req.body); // Debug log
+        if (!req.user?.uid) {
+            return res.status(401).json({ message: 'Unauthorized user context' });
+        }
 
-        if (!req.body.title) {
+        const payload = sanitizeTaskPayload(req.body);
+        if (!payload.title) {
             return res.status(400).json({ message: 'Task title is required' });
         }
 
-        const scheduledDate = normalizeIncomingScheduledDate(req.body.scheduledDate);
+        const scheduledDate = normalizeIncomingScheduledDate(payload.scheduledDate);
+        if (payload.scheduledDate != null && payload.scheduledDate !== '' && !scheduledDate) {
+            return res.status(400).json({ message: 'Invalid scheduledDate format' });
+        }
 
         const task = new Task({
             userId: req.user.uid,
-            title: req.body.title,
-            description: req.body.description || '',
-            priority: req.body.priority || 'medium',
-            project: req.body.project || 'Inbox',
-            estimatedTime: req.body.estimatedTime || 0,
+            title: payload.title,
+            description: payload.description,
+            priority: payload.priority,
+            project: payload.project,
+            estimatedTime: payload.estimatedTime,
             scheduledDate: scheduledDate || undefined,
-            scheduledTime: req.body.scheduledTime,
+            scheduledTime: payload.scheduledTime,
         });
 
         const newTask = await task.save();
@@ -162,11 +200,16 @@ router.post('/', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Error in POST /tasks:', err);
+        console.error(`${LOG_PREFIX} create failed`, {
+            error: err?.message,
+            name: err?.name,
+            code: err?.code,
+            userId: req.user?.uid,
+        });
         if (err.name === 'ValidationError') {
             return res.status(400).json({ message: 'Validation Error: ' + err.message });
         }
-        res.status(400).json({ message: err.message || 'Failed to create task' });
+        res.status(500).json({ message: 'Failed to create task' });
     }
 });
 

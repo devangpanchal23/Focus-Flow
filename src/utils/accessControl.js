@@ -3,21 +3,17 @@
  */
 
 export const getEffectiveRole = (backendUser, clerkUser) => {
-    const md = clerkUser?.publicMetadata || {};
-
     if (backendUser) {
         if (backendUser.role === 'admin' || backendUser.role === 'moderator') {
             return backendUser.role;
         }
-        if (backendUser.planType === 'full' || backendUser.hasFullAccess) return 'full';
-        if (backendUser.planType === 'pro' || backendUser.hasPro) return 'pro';
+        const hasPaidPlan =
+            backendUser.paymentStatus === 'completed' || backendUser.isPremium;
+        if (hasPaidPlan && (backendUser.planType === 'full' || backendUser.hasFullAccess)) return 'full';
+        if (hasPaidPlan && (backendUser.planType === 'pro' || backendUser.hasPro)) return 'pro';
+        return 'normal';
     }
 
-    let role = md.role || 'normal';
-    if (role === 'admin' || role === 'moderator') return role;
-    if (md.planType === 'full' || md.hasFullAccess) return 'full';
-    if (md.planType === 'pro' || md.hasPro) return 'pro';
-    if (role === 'full' || role === 'pro') return role;
     return 'normal';
 };
 

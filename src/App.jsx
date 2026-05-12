@@ -27,6 +27,7 @@ import { getEffectiveRole } from './utils/accessControl';
 import { logAppSession, patchUserState, createDebounced } from './utils/userStateSync';
 import { useSyncSettingsToMongo } from './hooks/useSyncSettingsToMongo';
 import { writeUiSnapshot, clearUiSnapshot } from './utils/readUiSnapshot';
+import { apiUrl } from './lib/api';
 
 /** Tabs that exist in routing / sidebar ids (premium gating clamps via userRole separately). */
 const KNOWN_APP_TAB_IDS = new Set([
@@ -51,6 +52,7 @@ function MainApp() {
   });
   
   const [backendUser, setBackendUser] = useState(null);
+  const [isHydratingUser, setIsHydratingUser] = useState(true);
 
   const { markPreferencesHydrated } = useSyncSettingsToMongo(getToken, !!currentUser?.id);
 
@@ -74,8 +76,27 @@ function MainApp() {
   const { fetchNotes, setAuthToken: setNoteAuthToken } = useNoteStore();
   const { fetchHistory: fetchJournalHistory, setAuthToken: setJournalAuthToken } = useJournalStore();
 
+  const fetchBackendProfile = async (token, attempts = 3) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const res = await fetch(apiUrl('/api/users/me'), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.ok) {
+          return await res.json();
+        }
+      } catch (error) {
+        if (attempt === attempts - 1) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+    }
+    return null;
+  };
+
   useEffect(() => {
     const initData = async () => {
+      setIsHydratingUser(true);
       if (currentUser) {
         try {
           const token = await getToken();
@@ -87,7 +108,7 @@ function MainApp() {
             };
 
             try {
-              await fetch('/api/users/sync', {
+              await fetch(apiUrl('/api/users/sync'), {
                 method: 'POST',
                 headers: authHeaders,
                 body: JSON.stringify({
@@ -103,11 +124,8 @@ function MainApp() {
                 }),
               });
 
-              const res = await fetch('/api/users/me', {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              if (res.ok) {
-                const data = await res.json();
+              const data = await fetchBackendProfile(token);
+              if (data?.user) {
                 setBackendUser(data.user ?? null);
                 if (data.preferences) {
                   useSettingsStore.setState({
@@ -135,6 +153,7 @@ function MainApp() {
                 );
                 markPreferencesHydrated();
               } else {
+                setBackendUser(null);
                 markPreferencesHydrated();
               }
 
@@ -164,15 +183,35 @@ function MainApp() {
           console.error("Error fetching Clerk token", error);
         }
       } else {
+        setBackendUser(null);
         clearUiSnapshot();
         useTaskStore.setState({ tasks: [], activeTaskId: null, error: null, authToken: null });
         useHabitStore.setState({ habits: [], completions: {}, error: null, authToken: null });
         useNoteStore.setState({ notes: [], error: null, authToken: null });
         useJournalStore.setState({ entries: [], error: null, authToken: null });
-      }
+      } 
+      setIsHydratingUser(false);
     };
     initData();
   }, [currentUser, getToken, fetchTasks, setTaskAuthToken, fetchHabits, setHabitAuthToken, fetchNotes, setNoteAuthToken, fetchJournalHistory, setJournalAuthToken, markPreferencesHydrated]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const onFocusRefresh = async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const data = await fetchBackendProfile(token);
+        if (data?.user) {
+          setBackendUser(data.user);
+        }
+      } catch (error) {
+        console.error('Failed to refresh backend profile:', error);
+      }
+    };
+    window.addEventListener('focus', onFocusRefresh);
+    return () => window.removeEventListener('focus', onFocusRefresh);
+  }, [currentUser?.id, getToken]);
 
   // Derive effective role based on privileges
   const userRole = getEffectiveRole(backendUser, currentUser);
@@ -211,7 +250,7 @@ function MainApp() {
       if (currentUser) {
         getToken().then((token) => {
           if (token) {
-            fetch('/api/users/me', { headers: { Authorization: `Bearer ${token}` } })
+            fetch(apiUrl('/api/users/me'), { headers: { Authorization: `Bearer ${token}` } })
               .then((res) => res.json())
               .then((data) => {
                 if (data.user) setBackendUser(data.user);
@@ -230,6 +269,16 @@ function MainApp() {
       window.removeEventListener('payment_success', handlePaymentSuccess);
     };
   }, [currentUser, getToken]);
+
+  if (isHydratingUser) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50 dark:bg-slate-900">
+        <div className="rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+          Syncing your workspace...
+        </div>
+      </div>
+    );
+  }
 
   const renderContent = () => {
     switch (activeTab) {

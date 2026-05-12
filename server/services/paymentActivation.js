@@ -65,7 +65,7 @@ export async function activatePlanFromPayment({
                 { upsert: true, new: true, setDefaultsOnInsert: true }
             );
 
-            const paymentDoc = new Payment({
+            const paymentPayload = {
                 userId: user.userId,
                 username: user.displayName || user.email.split('@')[0],
                 email: user.email,
@@ -76,8 +76,17 @@ export async function activatePlanFromPayment({
                 razorpay_signature,
                 status: 'SUCCESS',
                 ...(razorpaySnapshot && typeof razorpaySnapshot === 'object' ? razorpaySnapshot : {}),
-            });
-            await paymentDoc.save();
+            };
+            const paymentDoc = await Payment.findOneAndUpdate(
+                { razorpay_payment_id },
+                {
+                    $set: paymentPayload,
+                    $setOnInsert: {
+                        createdAt: new Date(),
+                    },
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
 
             if (tryClerkMetadata) {
                 try {
@@ -86,6 +95,7 @@ export async function activatePlanFromPayment({
                             hasPro: user.hasPro,
                             hasFullAccess: user.hasFullAccess,
                             role: user.role,
+                            isPremium: user.isPremium,
                             planType: user.planType,
                             paymentStatus: user.paymentStatus,
                         },

@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 import SubscriptionPricing from './SubscriptionPricing';
+import { apiUrl } from '../../lib/api';
 
 function formatReceiptDateTime(value) {
     if (value == null) return '—';
@@ -153,7 +154,7 @@ export default function Settings() {
         try {
             const token = await getToken();
             if (!token) return;
-            const res = await fetch('/api/payment/history', {
+            const res = await fetch(apiUrl('/api/payment/history'), {
                 headers: { Authorization: `Bearer ${token}` },
             });
             if (!res.ok) {

@@ -107,7 +107,6 @@ export const verifyPayment = async (req, res) => {
             razorpay_payment_id,
             razorpay_signature,
             mode,
-            amount,
         } = req.body;
 
         const userId = req.user?.uid;
@@ -227,8 +226,20 @@ export const verifyPayment = async (req, res) => {
         // -------------------------------
         // Final Amount
         // -------------------------------
-        const amountRupees =
-            amount || (mode === "PRO" ? 300 : 700);
+        const expectedAmountRupees =
+            mode === "PRO" ? 300 : 700;
+        const capturedAmountRupees = Math.round(
+            Number(paymentEntity.amount || 0) / 100
+        );
+
+        if (
+            capturedAmountRupees !== expectedAmountRupees
+        ) {
+            return res.status(400).json({
+                success: false,
+                error: "Captured amount mismatch",
+            });
+        }
 
         // -------------------------------
         // Snapshot
@@ -248,7 +259,7 @@ export const verifyPayment = async (req, res) => {
                 razorpay_order_id,
                 razorpay_signature,
 
-                amountInRupees: amountRupees,
+                amountInRupees: capturedAmountRupees,
 
                 email: req.body.email || paymentEntity.email,
                 displayName: req.body.displayName,
