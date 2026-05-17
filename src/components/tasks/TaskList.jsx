@@ -25,6 +25,7 @@ export default function TaskList({ tasks, viewFilter }) {
 
     const [newTaskTitle, setNewTaskTitle] = useState('');
     const [newTaskPriority, setNewTaskPriority] = useState('p4');
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor),
@@ -47,15 +48,19 @@ export default function TaskList({ tasks, viewFilter }) {
         }
     };
 
-    const handleAddTask = async (e) => {
-        if (e.key === 'Enter' && newTaskTitle.trim()) {
-            try {
-                await addTask(newTaskTitle, newTaskPriority, 'Inbox');
-                setNewTaskTitle('');
-                setNewTaskPriority('p4'); // Reset to default
-            } catch (error) {
-                alert('Failed to create task. Please try again.');
-            }
+    const submitTask = async (e) => {
+        if (e) e.preventDefault();
+        if (!newTaskTitle.trim() || isSubmitting) return;
+
+        setIsSubmitting(true);
+        try {
+            await addTask(newTaskTitle, newTaskPriority, 'Inbox');
+            setNewTaskTitle('');
+            setNewTaskPriority('p4'); // Reset to default
+        } catch (error) {
+            alert('Failed to create task. Please try again.');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -69,17 +74,22 @@ export default function TaskList({ tasks, viewFilter }) {
     return (
         <div className="space-y-6">
             {/* Input Area */}
-            <div className="relative group">
-                <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                    <Plus className="text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
-                </div>
+            <form onSubmit={submitTask} className="relative group">
+                <button 
+                    type="submit"
+                    disabled={!newTaskTitle.trim() || isSubmitting}
+                    className="absolute inset-y-0 left-4 flex items-center transition-colors text-slate-400 group-focus-within:text-indigo-500 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed z-10"
+                    aria-label="Create Task"
+                >
+                    <Plus />
+                </button>
                 <input
                     type="text"
                     placeholder="Add a new task... (Press Enter)"
-                    className="w-full py-4 pl-12 pr-32 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-700 placeholder:text-slate-400"
+                    className="w-full py-4 pl-12 pr-36 sm:pr-32 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-700 placeholder:text-slate-400"
                     value={newTaskTitle}
                     onChange={(e) => setNewTaskTitle(e.target.value)}
-                    onKeyDown={handleAddTask}
+                    enterKeyHint="done"
                 />
                 <div className="absolute inset-y-0 right-4 flex items-center gap-2">
                     <select
@@ -92,9 +102,17 @@ export default function TaskList({ tasks, viewFilter }) {
                         <option value="low">Low</option>
                         <option value="p4">P4</option>
                     </select>
+                    <button
+                        type="submit"
+                        disabled={!newTaskTitle.trim() || isSubmitting}
+                        className="flex items-center justify-center p-1.5 bg-indigo-600 text-white rounded-lg sm:hidden hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400"
+                        aria-label="Add Task"
+                    >
+                        <Plus size={16} strokeWidth={3} />
+                    </button>
                     <span className="text-xs font-mono text-slate-300 border border-slate-200 px-1.5 py-0.5 rounded hidden sm:inline-block">⏎</span>
                 </div>
-            </div>
+            </form>
 
             {/* Task List */}
             <DndContext

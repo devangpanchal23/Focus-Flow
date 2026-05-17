@@ -374,121 +374,121 @@ export default function Settings() {
 
                     {/* Billing & Receipts — one row per completed payment (Pro + Full upgrades each have a receipt) */}
                     {(viewerHasPaid || receiptRecords.length > 0) && (
-                    <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                        <div className="p-6 border-b border-slate-50">
-                            <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                                <Receipt size={20} className="text-indigo-500" />
-                                Billing & Receipts
-                            </h3>
-                            <p className="text-sm text-slate-500 mt-1">
-                                Full PDF receipts with gateway time, order ID, transaction ID, bank / UPI / wallet, card (if applicable), and fees when Razorpay provides them.
-                            </p>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            {receiptsLoading && (
-                                <div className="text-sm text-slate-500">Loading purchase receipts…</div>
-                            )}
-                            {receiptsError && (
-                                <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3">
-                                    {receiptsError}
-                                </div>
-                            )}
-                            {!receiptsLoading && receiptRecords.length === 0 && (
-                                <p className="text-sm text-slate-500">
-                                    No receipts in your account yet. After a successful payment, refresh this page—or buy a plan—the list updates automatically.
+                        <section className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                            <div className="p-6 border-b border-slate-50">
+                                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                                    <Receipt size={20} className="text-indigo-500" />
+                                    Billing & Receipts
+                                </h3>
+                                <p className="text-sm text-slate-500 mt-1">
+                                    Full PDF receipts with gateway time, order ID, transaction ID, bank / UPI / wallet, card (if applicable), and fees when Razorpay provides them.
                                 </p>
-                            )}
-                            {!receiptsLoading && receiptRecords.length > 0 && (
-                                <ul className="space-y-3">
-                                    {receiptRecords.map((p) => {
-                                        const planLabel =
-                                            p.mode === 'FULL' ? 'Full Unlock (Lifetime)' : 'Pro Mode (Lifetime)';
-                                        const amt = typeof p.amount === 'number' ? p.amount : Number(p.amount);
-                                        const chips = [];
-                                        if (p.paymentMethod)
-                                            chips.push(p.paymentMethod.replace(/_/g, ' '));
-                                        if (p.bank && String(p.bank).trim())
-                                            chips.push(`Bank: ${p.bank}`);
-                                        if (p.vpa && String(p.vpa).trim())
-                                            chips.push(`UPI: ${p.vpa}`);
-                                        if (p.wallet && String(p.wallet).trim())
-                                            chips.push(`Wallet: ${p.wallet}`);
-                                        return (
-                                            <li
-                                                key={p.id}
-                                                className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:border-indigo-100 transition-colors"
-                                            >
-                                                <div className="flex items-start gap-3 flex-1 min-w-0">
-                                                    <div className="shrink-0 w-11 h-11 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center">
-                                                        <Receipt size={22} />
-                                                    </div>
-                                                    <div className="min-w-0 flex-1">
-                                                        <div className="flex flex-wrap items-center gap-2">
-                                                            <span
-                                                                className={cn(
-                                                                    'font-bold text-slate-800',
-                                                                    p.mode === 'FULL'
-                                                                        ? 'text-purple-700'
-                                                                        : 'text-indigo-700'
-                                                                )}
-                                                            >
-                                                                {planLabel}
-                                                            </span>
-                                                            <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-green-100 text-green-700 border border-green-200">
-                                                                Paid
-                                                            </span>
+                            </div>
+                            <div className="p-6 space-y-4">
+                                {receiptsLoading && (
+                                    <div className="text-sm text-slate-500">Loading purchase receipts…</div>
+                                )}
+                                {receiptsError && (
+                                    <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3">
+                                        {receiptsError}
+                                    </div>
+                                )}
+                                {!receiptsLoading && receiptRecords.length === 0 && (
+                                    <p className="text-sm text-slate-500">
+                                        No receipts in your account yet. After a successful payment, refresh this page—or buy a plan—the list updates automatically.
+                                    </p>
+                                )}
+                                {!receiptsLoading && receiptRecords.length > 0 && (
+                                    <ul className="space-y-3">
+                                        {receiptRecords.map((p) => {
+                                            const planLabel =
+                                                p.mode === 'FULL' ? 'Full Unlock (Lifetime)' : 'Pro Mode (Lifetime)';
+                                            const amt = typeof p.amount === 'number' ? p.amount : Number(p.amount);
+                                            const chips = [];
+                                            if (p.paymentMethod)
+                                                chips.push(p.paymentMethod.replace(/_/g, ' '));
+                                            if (p.bank && String(p.bank).trim())
+                                                chips.push(`Bank: ${p.bank}`);
+                                            if (p.vpa && String(p.vpa).trim())
+                                                chips.push(`UPI: ${p.vpa}`);
+                                            if (p.wallet && String(p.wallet).trim())
+                                                chips.push(`Wallet: ${p.wallet}`);
+                                            return (
+                                                <li
+                                                    key={p.id}
+                                                    className="flex flex-col sm:flex-row sm:items-center gap-4 p-4 rounded-xl border border-slate-100 bg-slate-50/50 hover:border-indigo-100 transition-colors"
+                                                >
+                                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                                        <div className="shrink-0 w-11 h-11 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center">
+                                                            <Receipt size={22} />
                                                         </div>
-                                                        <p className="text-sm text-slate-600 mt-0.5">
-                                                            <span className="font-semibold text-slate-800">
-                                                                {p.currency === 'INR' ? `₹${amt.toFixed(2)}` : `${p.currency} ${amt.toFixed(2)}`}
-                                                            </span>
-                                                            <span className="text-slate-400 mx-2">•</span>
-                                                            Record date:{' '}
-                                                            <span>{formatReceiptDateTime(p.createdAtReceipt)}</span>
-                                                        </p>
-                                                        <p className="text-[11px] text-slate-500 mt-1 font-mono break-all">
-                                                            Txn {p.razorpay_payment_id || '—'}
-                                                        </p>
-                                                        {chips.length > 0 && (
-                                                            <div className="flex flex-wrap gap-1.5 mt-2">
-                                                                {chips.slice(0, 4).map((c, i) => (
-                                                                    <span
-                                                                        key={`${p.id}-${i}`}
-                                                                        className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 max-w-[200px] truncate"
-                                                                        title={c}
-                                                                    >
-                                                                        {c}
-                                                                    </span>
-                                                                ))}
+                                                        <div className="min-w-0 flex-1">
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span
+                                                                    className={cn(
+                                                                        'font-bold text-slate-800',
+                                                                        p.mode === 'FULL'
+                                                                            ? 'text-purple-700'
+                                                                            : 'text-indigo-700'
+                                                                    )}
+                                                                >
+                                                                    {planLabel}
+                                                                </span>
+                                                                <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-green-100 text-green-700 border border-green-200">
+                                                                    Paid
+                                                                </span>
                                                             </div>
-                                                        )}
+                                                            <p className="text-sm text-slate-600 mt-0.5">
+                                                                <span className="font-semibold text-slate-800">
+                                                                    {p.currency === 'INR' ? `₹${amt.toFixed(2)}` : `${p.currency} ${amt.toFixed(2)}`}
+                                                                </span>
+                                                                <span className="text-slate-400 mx-2">•</span>
+                                                                Record date:{' '}
+                                                                <span>{formatReceiptDateTime(p.createdAtReceipt)}</span>
+                                                            </p>
+                                                            <p className="text-[11px] text-slate-500 mt-1 font-mono break-all">
+                                                                Txn {p.razorpay_payment_id || '—'}
+                                                            </p>
+                                                            {chips.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                                                    {chips.slice(0, 4).map((c, i) => (
+                                                                        <span
+                                                                            key={`${p.id}-${i}`}
+                                                                            className="text-[10px] px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600 max-w-[200px] truncate"
+                                                                            title={c}
+                                                                        >
+                                                                            {c}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div className="flex shrink-0 gap-2 sm:flex-col lg:flex-row">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => printReceiptPdf(p)}
-                                                        className="p-3 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl border border-slate-200 bg-white shadow-sm"
-                                                        title="Print receipt"
-                                                    >
-                                                        <Printer size={18} />
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => downloadReceiptPdf(p)}
-                                                        className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold shadow-sm"
-                                                    >
-                                                        <FileText size={16} />
-                                                        Download PDF
-                                                    </button>
-                                                </div>
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            )}
-                        </div>
-                    </section>
+                                                    <div className="flex shrink-0 gap-2 sm:flex-col lg:flex-row">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => printReceiptPdf(p)}
+                                                            className="p-3 text-slate-500 hover:text-indigo-600 hover:bg-white rounded-xl border border-slate-200 bg-white shadow-sm"
+                                                            title="Print receipt"
+                                                        >
+                                                            <Printer size={18} />
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => downloadReceiptPdf(p)}
+                                                            className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold shadow-sm"
+                                                        >
+                                                            <FileText size={16} />
+                                                            Download PDF
+                                                        </button>
+                                                    </div>
+                                                </li>
+                                            );
+                                        })}
+                                    </ul>
+                                )}
+                            </div>
+                        </section>
                     )}
 
                     {/* Data Section */}
