@@ -74,9 +74,10 @@ export default function TaskList({ tasks, viewFilter }) {
     return (
         <div className="space-y-6">
             {/* Input Area */}
-            <form onSubmit={submitTask} className="relative group">
+            <div className="relative group">
                 <button 
-                    type="submit"
+                    type="button"
+                    onClick={submitTask}
                     disabled={!newTaskTitle.trim() || isSubmitting}
                     className="absolute inset-y-0 left-4 flex items-center transition-colors text-slate-400 group-focus-within:text-indigo-500 hover:text-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed z-10"
                     aria-label="Create Task"
@@ -89,6 +90,12 @@ export default function TaskList({ tasks, viewFilter }) {
                     className="w-full py-4 pl-12 pr-36 sm:pr-32 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-slate-700 placeholder:text-slate-400"
                     value={newTaskTitle}
                     onChange={(e) => setNewTaskTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            e.preventDefault();
+                            submitTask();
+                        }
+                    }}
                     enterKeyHint="done"
                 />
                 <div className="absolute inset-y-0 right-4 flex items-center gap-2">
@@ -103,7 +110,8 @@ export default function TaskList({ tasks, viewFilter }) {
                         <option value="p4">P4</option>
                     </select>
                     <button
-                        type="submit"
+                        type="button"
+                        onClick={submitTask}
                         disabled={!newTaskTitle.trim() || isSubmitting}
                         className="flex items-center justify-center p-1.5 bg-indigo-600 text-white rounded-lg sm:hidden hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400"
                         aria-label="Add Task"
@@ -112,7 +120,7 @@ export default function TaskList({ tasks, viewFilter }) {
                     </button>
                     <span className="text-xs font-mono text-slate-300 border border-slate-200 px-1.5 py-0.5 rounded hidden sm:inline-block">⏎</span>
                 </div>
-            </form>
+            </div>
 
             {/* Task List */}
             <DndContext
